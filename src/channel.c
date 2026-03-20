@@ -71,7 +71,7 @@ static void tg_poll(nc_channel *self, nc_agent *agent) {
     const char *hdrs[] = {"Content-Type: application/json"};
     nc_http_response resp;
     
-    nc_log(NC_LOG_INFO, "Polling Telegram with token %s...", ctx->token);
+    nc_log(NC_LOG_DEBUG, "Polling Telegram...");
     if (!nc_http_post(url, body, strlen(body), hdrs, 1, &resp)) {
         nc_log(NC_LOG_ERROR, "TG poll failed (network)");
         sleep(5);
@@ -141,6 +141,11 @@ static bool tg_send(nc_channel *self, const char *to, const char *text) {
     return true;
 }
 
+static void tg_free(nc_channel *self) {
+    free(self->ctx);
+    self->ctx = NULL;
+}
+
 nc_channel nc_channel_telegram(const char *token) {
     tg_ctx *ctx = calloc(1, sizeof(tg_ctx));
     nc_strlcpy(ctx->token, token, sizeof(ctx->token));
@@ -149,6 +154,6 @@ nc_channel nc_channel_telegram(const char *token) {
         .ctx = ctx,
         .poll = tg_poll,
         .send = tg_send,
-        .free = NULL
+        .free = tg_free
     };
 }

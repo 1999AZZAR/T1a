@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <time.h>
 
 #define NC_VERSION       "0.1.0"
 #define NC_CONFIG_DIR    ".noclaw"
@@ -230,6 +231,11 @@ typedef struct nc_agent {
     nc_message   messages[NC_MAX_MESSAGES];
     int          message_count;
     nc_arena     arena;
+    const char  *cached_tools_json;
+    char        *tool_result_buf;
+    size_t       tool_result_cap;
+    int          actions_this_hour;
+    time_t       hour_window_start;
 } nc_agent;
 
 struct nc_channel {
@@ -271,7 +277,7 @@ nc_tool nc_tool_http_fetch(void);
 nc_tool nc_tool_list_dir(const nc_config *cfg);
 nc_tool nc_tool_env_get(void);
 nc_tool nc_tool_base64(void);
-nc_tool nc_tool_hash(void);
+nc_tool nc_tool_hash(const nc_config *cfg);
 
 #define NC_MAX_TOOLS 128
 
@@ -281,6 +287,8 @@ void nc_mcp_cleanup(void);
 
 nc_memory nc_memory_noop(void);
 nc_memory nc_memory_flat(const char *path);
+
+int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *mem);
 
 void nc_agent_init(nc_agent *agent, nc_config *cfg, nc_provider *prov,
                    nc_tool *tools, int tool_count, nc_memory *mem);

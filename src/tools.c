@@ -10,6 +10,43 @@
 #include <dirent.h>
 #include <time.h>
 #include <ctype.h>
+#include <limits.h>
+
+/* ── Path validation: resolve and confine to workspace ─────────── */
+
+static bool resolve_safe_path(const nc_config *cfg, const char *input,
+                              char *resolved, size_t resolved_cap) {
+    char full[2048];
+    if (input[0] == '/') {
+        nc_strlcpy(full, input, sizeof(full));
+    } else {
+        nc_path_join(full, sizeof(full), cfg->workspace_dir, input);
+    }
+
+    if (!realpath(full, resolved)) {
+        char parent[2048];
+        nc_strlcpy(parent, full, sizeof(parent));
+        char *slash = strrchr(parent, '/');
+        if (slash) *slash = '\0';
+        char rparent[PATH_MAX];
+        if (!realpath(parent, rparent)) return false;
+        if (slash) {
+            snprintf(resolved, resolved_cap, "%s/%s", rparent, slash + 1);
+        } else {
+            nc_strlcpy(resolved, full, resolved_cap);
+        }
+    }
+
+    if (cfg->workspace_only) {
+        char ws_real[PATH_MAX];
+        if (!realpath(cfg->workspace_dir, ws_real)) return false;
+        size_t wslen = strlen(ws_real);
+        if (strncmp(resolved, ws_real, wslen) != 0 ||
+            (resolved[wslen] != '/' && resolved[wslen] != '\0'))
+            return false;
+    }
+    return true;
+}
 
 /* ── Helper: extract string from tool args JSON ───────────────── */
 
@@ -37,6 +74,25 @@ static nc_json *parse_args_root(const char *json, nc_arena *a) {
     return (root && root->type == NC_JSON_OBJECT) ? root : NULL;
 }
 
+static bool extract_json_strings(const char *json,
+                                 const char *const *keys, char **outs,
+                                 const size_t *caps, int count) {
+    nc_arena a;
+    nc_json *root = parse_args_root(json, &a);
+    if (!root) { nc_arena_free(&a); return false; }
+    bool ok = true;
+    for (int i = 0; i < count; i++) {
+        nc_json *val = nc_json_get(root, keys[i]);
+        nc_str s = nc_json_str(val, "");
+        if (s.len == 0) { ok = false; continue; }
+        size_t cplen = s.len < caps[i] - 1 ? s.len : caps[i] - 1;
+        memcpy(outs[i], s.ptr, cplen);
+        outs[i][cplen] = '\0';
+    }
+    nc_arena_free(&a);
+    return ok;
+}
+
 /* ── Shell tool ───────────────────────────────────────────────── */
 
 static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
@@ -53,15 +109,26 @@ static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_
         return false;
     }
 
-    char final_cmd[8192];
+    char *saved_cwd = NULL;
     if (cfg->workspace_only) {
-        snprintf(final_cmd, sizeof(final_cmd), "cd '%s' && %s 2>&1", cfg->workspace_dir, command);
-    } else {
-        snprintf(final_cmd, sizeof(final_cmd), "%s 2>&1", command);
+        saved_cwd = getcwd(NULL, 0);
+        if (!saved_cwd) {
+            nc_strlcpy(out, "error: cannot save current directory", out_cap);
+            return false;
+        }
+        if (chdir(cfg->workspace_dir) != 0) {
+            snprintf(out, out_cap, "error: cannot chdir to workspace");
+            free(saved_cwd);
+            return false;
+        }
     }
+
+    char final_cmd[8192];
+    snprintf(final_cmd, sizeof(final_cmd), "%s 2>&1", command);
 
     FILE *fp = popen(final_cmd, "r");
     if (!fp) {
+        if (saved_cwd) { chdir(saved_cwd); free(saved_cwd); }
         nc_strlcpy(out, "error: popen failed", out_cap);
         return false;
     }
@@ -76,6 +143,8 @@ static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_
     }
     out[total] = '\0';
     int status = pclose(fp);
+
+    if (saved_cwd) { chdir(saved_cwd); free(saved_cwd); }
 
     if (total == 0 && status != 0) {
         snprintf(out, out_cap, "error: exit code %d", WEXITSTATUS(status));
@@ -109,17 +178,16 @@ static bool file_read_execute(nc_tool *self, const char *args_json, char *out, s
         return false;
     }
 
-    char full_path[2048];
-    if (path[0] == '/') {
-        nc_strlcpy(full_path, path, sizeof(full_path));
-    } else {
-        nc_path_join(full_path, sizeof(full_path), cfg->workspace_dir, path);
+    char safe_path[PATH_MAX];
+    if (!resolve_safe_path(cfg, path, safe_path, sizeof(safe_path))) {
+        nc_strlcpy(out, "error: path outside workspace or invalid", out_cap);
+        return false;
     }
 
     size_t len;
-    char *content = nc_read_file(full_path, &len);
+    char *content = nc_read_file(safe_path, &len);
     if (!content) {
-        snprintf(out, out_cap, "error: cannot read %s", full_path);
+        snprintf(out, out_cap, "error: cannot read %s", path);
         return false;
     }
 
@@ -148,24 +216,24 @@ nc_tool nc_tool_file_read(const nc_config *cfg) {
 static bool file_write_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
     const nc_config *cfg = (const nc_config *)self->ctx;
     char path[1024];
-    /* 256KB for large content on small SBCs */
     char *content = malloc(262144);
     if (!content) return false;
 
     if (!extract_json_string(args_json, "path", path, sizeof(path)) ||
         !extract_json_string(args_json, "content", content, 262144)) {
         free(content);
+        nc_strlcpy(out, "error: missing 'path' or 'content'", out_cap);
         return false;
     }
 
-    char full_path[2048];
-    if (path[0] == '/') {
-        nc_strlcpy(full_path, path, sizeof(full_path));
-    } else {
-        nc_path_join(full_path, sizeof(full_path), cfg->workspace_dir, path);
+    char safe_path[PATH_MAX];
+    if (!resolve_safe_path(cfg, path, safe_path, sizeof(safe_path))) {
+        free(content);
+        nc_strlcpy(out, "error: path outside workspace or invalid", out_cap);
+        return false;
     }
 
-    bool ok = nc_write_file(full_path, content, strlen(content));
+    bool ok = nc_write_file(safe_path, content, strlen(content));
     if (ok) snprintf(out, out_cap, "OK: wrote %zu bytes to %s", strlen(content), path);
     else snprintf(out, out_cap, "error: write failed");
 
@@ -190,9 +258,11 @@ nc_tool nc_tool_file_write(const nc_config *cfg) {
 
 static bool memory_store_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
     nc_memory *mem = (nc_memory *)self->ctx;
-    char key[256], content[16384]; /* Larger content for memories */
-    if (!extract_json_string(args_json, "key", key, sizeof(key)) ||
-        !extract_json_string(args_json, "content", content, sizeof(content))) return false;
+    char key[256], content[16384];
+    const char *const keys[] = {"key", "content"};
+    char *outs[] = {key, content};
+    const size_t caps[] = {sizeof(key), sizeof(content)};
+    if (!extract_json_strings(args_json, keys, outs, caps, 2)) return false;
     if (mem->store(mem, key, content)) {
         snprintf(out, out_cap, "Stored: %s", key);
         return true;
@@ -676,22 +746,16 @@ static bool list_dir_execute(nc_tool *self, const char *args_json, char *out, si
         nc_arena_free(&a);
     }
 
-    char full_path[2048];
-    if (path[0] == '/') {
-        nc_strlcpy(full_path, path, sizeof(full_path));
-    } else {
-        nc_path_join(full_path, sizeof(full_path), cfg->workspace_dir, path);
-    }
-
-    if (strstr(full_path, "..")) {
-        nc_strlcpy(out, "error: path traversal not allowed", out_cap);
+    char safe_path[PATH_MAX];
+    if (!resolve_safe_path(cfg, path, safe_path, sizeof(safe_path))) {
+        nc_strlcpy(out, "error: path outside workspace or invalid", out_cap);
         return false;
     }
 
     out[0] = '[';
     out[1] = '\0';
     size_t off = 1;
-    list_dir_append(full_path, 0, max_depth, recursive, out, out_cap, &off);
+    list_dir_append(safe_path, 0, max_depth, recursive, out, out_cap, &off);
     if (off + 2 < out_cap) { out[off++] = ']'; out[off] = '\0'; }
     return true;
 }
@@ -718,8 +782,19 @@ static const char *const env_whitelist[] = {
     NULL
 };
 
+static const char *const env_secret_blocklist[] = {
+    "NOCLAW_API_KEY", "NOCLAW_TELEGRAM_TOKEN", "NOCLAW_DISCORD_TOKEN",
+    "NOCLAW_SLACK_TOKEN", "NOCLAW_FALLBACK_API_KEY",
+    NULL
+};
+
 static bool env_allowed(const char *name) {
-    if (strncmp(name, "NOCLAW_", 7) == 0) return true;
+    if (strncmp(name, "NOCLAW_", 7) == 0) {
+        for (int i = 0; env_secret_blocklist[i]; i++) {
+            if (strcmp(name, env_secret_blocklist[i]) == 0) return false;
+        }
+        return true;
+    }
     for (int i = 0; env_whitelist[i]; i++) {
         if (strcmp(name, env_whitelist[i]) == 0) return true;
     }
@@ -832,12 +907,11 @@ static bool base64_execute(nc_tool *self, const char *args_json, char *out, size
     (void)self;
     char input[16384];
     char mode[16];
-    if (!extract_json_string(args_json, "input", input, sizeof(input))) {
-        nc_strlcpy(out, "error: missing 'input'", out_cap);
-        return false;
-    }
-    if (!extract_json_string(args_json, "mode", mode, sizeof(mode))) {
-        nc_strlcpy(out, "error: missing 'mode'", out_cap);
+    const char *const keys[] = {"input", "mode"};
+    char *outs[] = {input, mode};
+    const size_t caps[] = {sizeof(input), sizeof(mode)};
+    if (!extract_json_strings(args_json, keys, outs, caps, 2)) {
+        nc_strlcpy(out, "error: missing 'input' or 'mode'", out_cap);
         return false;
     }
     size_t in_len = strlen(input);
@@ -989,15 +1063,14 @@ static void sha256_hash(const void *data, size_t len, unsigned char *out) {
 }
 
 static bool hash_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
-    (void)self;
+    const nc_config *cfg = (const nc_config *)self->ctx;
     char input[4096];
     char algorithm[16];
-    if (!extract_json_string(args_json, "input", input, sizeof(input))) {
-        nc_strlcpy(out, "error: missing 'input'", out_cap);
-        return false;
-    }
-    if (!extract_json_string(args_json, "algorithm", algorithm, sizeof(algorithm))) {
-        nc_strlcpy(out, "error: missing 'algorithm'", out_cap);
+    const char *const hkeys[] = {"input", "algorithm"};
+    char *houts[] = {input, algorithm};
+    const size_t hcaps[] = {sizeof(input), sizeof(algorithm)};
+    if (!extract_json_strings(args_json, hkeys, houts, hcaps, 2)) {
+        nc_strlcpy(out, "error: missing 'input' or 'algorithm'", out_cap);
         return false;
     }
 
@@ -1006,8 +1079,13 @@ static bool hash_execute(nc_tool *self, const char *args_json, char *out, size_t
     char *file_buf = NULL;
 
     if (nc_file_exists(input)) {
+        char safe_path[PATH_MAX];
+        if (!resolve_safe_path(cfg, input, safe_path, sizeof(safe_path))) {
+            nc_strlcpy(out, "error: file path outside workspace", out_cap);
+            return false;
+        }
         size_t len;
-        file_buf = nc_read_file(input, &len);
+        file_buf = nc_read_file(safe_path, &len);
         if (!file_buf) {
             snprintf(out, out_cap, "error: cannot read file %s", input);
             return false;
@@ -1043,14 +1121,14 @@ static bool hash_execute(nc_tool *self, const char *args_json, char *out, size_t
     return ok;
 }
 
-nc_tool nc_tool_hash(void) {
+nc_tool nc_tool_hash(const nc_config *cfg) {
     return (nc_tool){
         .def = {
             .name = "hash",
             .description = "Compute MD5 or SHA-256 of a string or file. Input: text or file path.",
             .parameters_json = "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"},\"algorithm\":{\"type\":\"string\"}},\"required\":[\"input\",\"algorithm\"]}",
         },
-        .ctx = NULL,
+        .ctx = (void *)cfg,
         .execute = hash_execute,
         .free = NULL,
     };

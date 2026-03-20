@@ -99,6 +99,9 @@ static bool parse_request(int fd, http_request *req) {
         }
         if (strncasecmp(line, "Content-Length:", 15) == 0) {
             content_length = (size_t)atol(line + 15);
+            if (content_length > sizeof(req->body) - 1) {
+                return false;
+            }
         }
     }
 

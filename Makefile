@@ -1,7 +1,7 @@
 CC = cc
 CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-parameter
-INCLUDES = -Isrc
-LDFLAGS = -lbearssl
+INCLUDES = -Isrc -I/usr/local/include
+LDFLAGS = -L/usr/local/lib -lbearssl
 
 # Optimization: small binary, fast code
 RELEASE_FLAGS = -Os -DNDEBUG -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables
@@ -17,7 +17,11 @@ OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 TARGET = noclaw
 
-.PHONY: all clean debug release
+TEST_FLAGS = -g -O0 -DNC_TEST -DNC_TEST_MAIN
+TEST_OBJ_DIR = obj_test
+TEST_OBJS = $(SRCS:$(SRC_DIR)/%.c=$(TEST_OBJ_DIR)/%.o)
+
+.PHONY: all clean debug release test
 
 all: release
 
@@ -38,5 +42,17 @@ release: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $(OPT_FLAGS) -o $@ $^ $(LDFLAGS)
 
+test: $(TARGET)_test
+	./$(TARGET)_test
+
+$(TEST_OBJ_DIR):
+	mkdir -p $(TEST_OBJ_DIR)
+
+$(TEST_OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(TEST_OBJ_DIR)
+	$(CC) $(CFLAGS) $(TEST_FLAGS) $(INCLUDES) -c $< -o $@
+
+$(TARGET)_test: $(TEST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_FLAGS) -o $@ $^ $(LDFLAGS)
+
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rm -rf $(OBJ_DIR) $(TEST_OBJ_DIR) $(TARGET) $(TARGET)_test

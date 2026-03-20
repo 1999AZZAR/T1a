@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 /* ── Init / Free ──────────────────────────────────────────────── */
 
@@ -133,9 +134,9 @@ static void agent_compact_memory(nc_agent *agent) {
         }
     }
 
-    /* Free old arena and swap */
     nc_arena_free(&agent->arena);
     agent->arena = new_arena;
+    agent->cached_tools_json = NULL;
 }
 
 /* ── Add message to history ───────────────────────────────────── */
@@ -185,15 +186,25 @@ static nc_tool *find_tool(nc_agent *agent, const char *name) {
 const char *nc_agent_chat(nc_agent *agent, const char *user_input) {
     agent_push_msg(agent, "user", user_input, NULL, NULL, 0);
 
-    const char *tools_json = build_tools_json(agent);
-    /* Increased max iterations and added fallback logic */
+    if (!agent->cached_tools_json)
+        agent->cached_tools_json = build_tools_json(agent);
+
+    const char *tools_json = agent->cached_tools_json;
     int max_iterations = 16;
 
+    if (!agent->tool_result_buf) {
+        agent->tool_result_cap = 262144;
+        agent->tool_result_buf = (char *)malloc(agent->tool_result_cap);
+        if (!agent->tool_result_buf) return "error: OOM allocating tool buffer";
+    }
+
     for (int iter = 0; iter < max_iterations; iter++) {
-        /* Force final answer on last iteration by disabling tools */
         if (iter == max_iterations - 1) {
-            agent_push_msg(agent, "system", "System: Maximum tool iteration limit reached. Please provide a final response based on the information gathered so far.", NULL, NULL, 0);
-            tools_json = NULL; /* Explicitly disable tools for this request */
+            agent_push_msg(agent, "system",
+                "System: Maximum tool iteration limit reached. "
+                "Provide a final response based on information gathered so far.",
+                NULL, NULL, 0);
+            tools_json = NULL;
         }
 
         nc_chat_request req = {
@@ -227,20 +238,33 @@ const char *nc_agent_chat(nc_agent *agent, const char *user_input) {
         for (int i = 0; i < resp.tool_call_count; i++) {
             nc_tool_call *tc = &resp.tool_calls[i];
             nc_tool *tool = find_tool(agent, tc->name);
-            /* High-capacity buffer for raw tool outputs (Markdown/JSON) */
-            size_t result_buf_size = 262144; /* 256KB */
-            char *result_buf = malloc(result_buf_size);
-            if (!result_buf) return "error: OOM in tool dispatch";
 
-            if (tool) {
-                bool ok = tool->execute(tool, tc->arguments, result_buf, result_buf_size);
-                (void)ok;
-            } else {
-                snprintf(result_buf, result_buf_size, "error: unknown tool '%s'", tc->name);
+            if (agent->config->max_actions_per_hour > 0) {
+                time_t now = time(NULL);
+                if (now - agent->hour_window_start >= 3600) {
+                    agent->hour_window_start = now;
+                    agent->actions_this_hour = 0;
+                }
+                if (agent->actions_this_hour >= agent->config->max_actions_per_hour) {
+                    snprintf(agent->tool_result_buf, agent->tool_result_cap,
+                        "error: rate limit exceeded (%d actions/hour)",
+                        agent->config->max_actions_per_hour);
+                    agent_push_msg(agent, "tool", agent->tool_result_buf, tc->id, NULL, 0);
+                    continue;
+                }
+                agent->actions_this_hour++;
             }
 
-            agent_push_msg(agent, "tool", result_buf, tc->id, NULL, 0);
-            free(result_buf);
+            agent->tool_result_buf[0] = '\0';
+            if (tool) {
+                tool->execute(tool, tc->arguments,
+                              agent->tool_result_buf, agent->tool_result_cap);
+            } else {
+                snprintf(agent->tool_result_buf, agent->tool_result_cap,
+                         "error: unknown tool '%s'", tc->name);
+            }
+
+            agent_push_msg(agent, "tool", agent->tool_result_buf, tc->id, NULL, 0);
         }
     }
 
@@ -248,21 +272,36 @@ const char *nc_agent_chat(nc_agent *agent, const char *user_input) {
 }
 
 void nc_agent_reset(nc_agent *agent) {
-    char role_buf[32];
-    char content_buf[16384];
-    nc_strlcpy(role_buf, agent->messages[0].role, sizeof(role_buf));
-    nc_strlcpy(content_buf, agent->messages[0].content, sizeof(content_buf));
+    size_t role_len = strlen(agent->messages[0].role);
+    size_t content_len = strlen(agent->messages[0].content);
+
+    char *role_copy = (char *)malloc(role_len + 1);
+    char *content_copy = (char *)malloc(content_len + 1);
+    if (!role_copy || !content_copy) {
+        free(role_copy);
+        free(content_copy);
+        return;
+    }
+    memcpy(role_copy, agent->messages[0].role, role_len + 1);
+    memcpy(content_copy, agent->messages[0].content, content_len + 1);
 
     nc_arena_reset(&agent->arena);
+    agent->cached_tools_json = NULL;
 
     agent->messages[0] = (nc_message){
-        .role = nc_arena_dup(&agent->arena, role_buf, strlen(role_buf)),
-        .content = nc_arena_dup(&agent->arena, content_buf, strlen(content_buf)),
+        .role = nc_arena_dup(&agent->arena, role_copy, role_len),
+        .content = nc_arena_dup(&agent->arena, content_copy, content_len),
     };
     agent->message_count = 1;
+
+    free(role_copy);
+    free(content_copy);
 }
 
 void nc_agent_free(nc_agent *agent) {
+    free(agent->tool_result_buf);
+    agent->tool_result_buf = NULL;
+    agent->cached_tools_json = NULL;
     nc_arena_free(&agent->arena);
     agent->message_count = 0;
 }

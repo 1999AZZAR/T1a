@@ -12,6 +12,9 @@
 #include <time.h>
 #include <ctype.h>
 #include <strings.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* ── Flat-file context ───────────────────────────────────────── */
 
@@ -95,9 +98,19 @@ static int tokenize(const char *query, const char *tokens[], int lens[], int max
     return n;
 }
 
-/* ── File I/O helpers ────────────────────────────────────────── */
+/* ── File I/O helpers with advisory locking ──────────────────── */
 
-/* Read entire file into malloc'd buffer. Returns NULL if file doesn't exist. */
+static int mem_lock(const char *path, int operation) {
+    int fd = open(path, O_RDONLY | O_CREAT, 0644);
+    if (fd < 0) return -1;
+    if (flock(fd, operation) < 0) { close(fd); return -1; }
+    return fd;
+}
+
+static void mem_unlock(int fd) {
+    if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
+}
+
 static char *read_all(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "r");
     if (!f) { *out_len = 0; return NULL; }
@@ -117,7 +130,6 @@ static char *read_all(const char *path, size_t *out_len) {
     return buf;
 }
 
-/* Write buffer to file atomically (write to .tmp, rename) */
 static bool write_all(const char *path, const char *data, size_t len) {
     char tmp[520];
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
@@ -161,7 +173,7 @@ static void flat_prune(flat_mem *ctx, size_t max_size_bytes) {
     char *start = data;
     char *p = data;
     
-    while (p - start < cut_target && *p) {
+    while ((size_t)(p - start) < cut_target && *p) {
         char *eol = strchr(p, '\n');
         if (!eol) break;
         p = eol + 1;
@@ -176,12 +188,11 @@ static void flat_prune(flat_mem *ctx, size_t max_size_bytes) {
     free(data);
 }
 
-/* Store with auto-pruning */
 static bool flat_store(nc_memory *self, const char *key, const char *content) {
     flat_mem *ctx = (flat_mem *)self->ctx;
     if (!ctx) return false;
 
-    /* ... escape logic ... */
+    int lk = mem_lock(ctx->path, LOCK_EX);
     time_t now = time(NULL);
     char esc_key[1024], esc_content[8192];
     flat_escape(key, esc_key, sizeof(esc_key));
@@ -195,7 +206,7 @@ static bool flat_store(nc_memory *self, const char *key, const char *content) {
     /* ... same logic as before to build new content ... */
     size_t new_cap = flen + eklen + strlen(esc_content) + 64;
     char *out = (char *)malloc(new_cap);
-    if (!out) { free(data); return false; }
+    if (!out) { free(data); mem_unlock(lk); return false; }
 
     size_t out_len = 0;
     if (data) {
@@ -204,7 +215,6 @@ static bool flat_store(nc_memory *self, const char *key, const char *content) {
             char *eol = strchr(line, '\n');
             size_t llen = eol ? (size_t)(eol - line) : strlen(line);
             
-            /* Logic to remove dupe key */
             bool skip = false;
             if (llen > eklen) {
                 skip = (memcmp(line, esc_key, eklen) == 0 && line[eklen] == '\t');
@@ -228,12 +238,11 @@ static bool flat_store(nc_memory *self, const char *key, const char *content) {
     free(out);
     free(data);
 
-    /* Check size and prune if needed (e.g. > 1MB) */
-    /* In a real config we'd pass this limit down. For now hardcode generous 1MB */
     if (ok && out_len > 1024 * 1024) {
         flat_prune(ctx, 1024 * 1024);
     }
 
+    mem_unlock(lk);
     return ok;
 }
 
@@ -245,9 +254,11 @@ static bool flat_recall(nc_memory *self, const char *query, char *out, size_t ou
     flat_mem *ctx = (flat_mem *)self->ctx;
     if (!ctx) return false;
 
+    int lk = mem_lock(ctx->path, LOCK_SH);
     size_t flen = 0;
     char *data = read_all(ctx->path, &flen);
     if (!data) {
+        mem_unlock(lk);
         nc_strlcpy(out, "No matching memories found.", out_cap);
         return false;
     }
@@ -258,6 +269,7 @@ static bool flat_recall(nc_memory *self, const char *query, char *out, size_t ou
     int ntokens = tokenize(query, tokens, lens, 32);
     if (ntokens == 0) {
         free(data);
+        mem_unlock(lk);
         nc_strlcpy(out, "No matching memories found.", out_cap);
         return false;
     }
@@ -330,6 +342,7 @@ static bool flat_recall(nc_memory *self, const char *query, char *out, size_t ou
     }
 
     free(data);
+    mem_unlock(lk);
 
     if (count == 0) {
         nc_strlcpy(out, "No matching memories found.", out_cap);
@@ -344,9 +357,10 @@ static bool flat_forget(nc_memory *self, const char *key) {
     flat_mem *ctx = (flat_mem *)self->ctx;
     if (!ctx) return false;
 
+    int lk = mem_lock(ctx->path, LOCK_EX);
     size_t flen = 0;
     char *data = read_all(ctx->path, &flen);
-    if (!data) return true;  /* nothing to forget */
+    if (!data) { mem_unlock(lk); return true; }
 
     /* Escape key to match stored format */
     char esc_key[1024];
@@ -354,7 +368,7 @@ static bool flat_forget(nc_memory *self, const char *key) {
     size_t eklen = strlen(esc_key);
 
     char *out = (char *)malloc(flen + 1);
-    if (!out) { free(data); return false; }
+    if (!out) { free(data); mem_unlock(lk); return false; }
 
     size_t out_len = 0;
     char *line = data;
@@ -377,6 +391,7 @@ static bool flat_forget(nc_memory *self, const char *key) {
     bool ok = write_all(ctx->path, out, out_len);
     free(out);
     free(data);
+    mem_unlock(lk);
     return ok;
 }
 

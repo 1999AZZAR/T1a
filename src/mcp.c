@@ -148,17 +148,20 @@ static char *mcp_read_msg(mcp_server *s, nc_arena *msg_arena) {
 
 static nc_json *mcp_rpc_call(mcp_server *s, const char *method, const char *params_json, nc_arena *arena) {
     int id = ++s->id_counter;
-    char *req = nc_arena_alloc(arena, 8192 + (params_json ? strlen(params_json) : 0));
-    
+    size_t req_sz = 512 + (params_json ? strlen(params_json) : 0);
+    char *req = nc_arena_alloc(arena, req_sz);
+    if (!req) return NULL;
+
     if (params_json) {
-        sprintf(req, "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"params\":%s,\"id\":%d}\n", 
-                 method, params_json, id);
+        snprintf(req, req_sz,
+            "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"params\":%s,\"id\":%d}\n",
+            method, params_json, id);
     } else {
-        sprintf(req, "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"id\":%d}\n", 
-                 method, id);
+        snprintf(req, req_sz,
+            "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"id\":%d}\n",
+            method, id);
     }
 
-    /* Send */
     if (write(s->fd_in, req, strlen(req)) < 0) return NULL;
     /* nc_log(NC_LOG_DEBUG, "MCP -> %s: %s", s->name, req); */
 
@@ -313,8 +316,10 @@ static bool mcp_tool_execute(nc_tool *self, const char *args_json, char *out, si
     /* tools/call params: { name: "toolname", arguments: { ... } } */
     /* args_json comes from the LLM, it IS the arguments object string. */
     
-    char *params = nc_arena_alloc(&a, strlen(args_json) + 1024);
-    sprintf(params, "{\"name\":\"%s\",\"arguments\":%s}", self->def.name, args_json);
+    size_t params_sz = strlen(args_json) + strlen(self->def.name) + 64;
+    char *params = nc_arena_alloc(&a, params_sz);
+    if (!params) { nc_arena_free(&a); return false; }
+    snprintf(params, params_sz, "{\"name\":\"%s\",\"arguments\":%s}", self->def.name, args_json);
 
     nc_json *res = mcp_rpc_call(s, "tools/call", params, &a);
     if (!res) {
@@ -480,8 +485,9 @@ int nc_mcp_register_all(const nc_config *cfg, nc_tool *tools, int start_idx) {
         for (const char **k = inherit; *k; k++) {
             const char *v = getenv(*k);
             if (v && envc < 127) {
-                char *entry = nc_arena_alloc(&s->arena, strlen(*k) + strlen(v) + 2);
-                sprintf(entry, "%s=%s", *k, v);
+                size_t esz = strlen(*k) + strlen(v) + 2;
+                char *entry = nc_arena_alloc(&s->arena, esz);
+                snprintf(entry, esz, "%s=%s", *k, v);
                 envp[envc++] = entry;
             }
         }
@@ -491,8 +497,9 @@ int nc_mcp_register_all(const nc_config *cfg, nc_tool *tools, int start_idx) {
             for (int k = 0; k < env_obj->object.count && envc < 127; k++) {
                 nc_str key = env_obj->object.keys[k];
                 nc_str val = nc_json_str(&env_obj->object.vals[k], "");
-                char *entry = nc_arena_alloc(&s->arena, key.len + val.len + 2);
-                sprintf(entry, "%.*s=%.*s", NC_STR_ARG(key), NC_STR_ARG(val));
+                size_t esz = key.len + val.len + 2;
+                char *entry = nc_arena_alloc(&s->arena, esz);
+                snprintf(entry, esz, "%.*s=%.*s", NC_STR_ARG(key), NC_STR_ARG(val));
                 envp[envc++] = entry;
             }
         }

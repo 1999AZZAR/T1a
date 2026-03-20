@@ -4,6 +4,25 @@
 #include <stdio.h>
 #include <unistd.h>
 
+int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *mem) {
+    int n = 0;
+    tools[n++] = nc_tool_shell(cfg);
+    tools[n++] = nc_tool_file_read(cfg);
+    tools[n++] = nc_tool_file_write(cfg);
+    tools[n++] = nc_tool_memory_store(mem);
+    tools[n++] = nc_tool_memory_recall(mem);
+    tools[n++] = nc_tool_get_time();
+    tools[n++] = nc_tool_sys_info();
+    tools[n++] = nc_tool_calc();
+    tools[n++] = nc_tool_http_fetch();
+    tools[n++] = nc_tool_list_dir(cfg);
+    tools[n++] = nc_tool_env_get();
+    tools[n++] = nc_tool_base64();
+    tools[n++] = nc_tool_hash(cfg);
+    n = nc_mcp_register_all(cfg, tools, n);
+    return n;
+}
+
 int nc_cmd_agent(int argc, char **argv) {
     nc_config cfg;
     nc_config_defaults(&cfg);
@@ -31,25 +50,11 @@ int nc_cmd_agent(int argc, char **argv) {
                cfg.fallback_model[0] ? cfg.fallback_model : "default model");
     }
 
-    nc_memory mem = nc_memory_flat("workspace/memories.tsv");
+    char mem_path[1024];
+    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "memories.tsv");
+    nc_memory mem = nc_memory_flat(mem_path);
     nc_tool tools[NC_MAX_TOOLS];
-    int tool_count = 0;
-
-    tools[tool_count++] = nc_tool_shell(&cfg);
-    tools[tool_count++] = nc_tool_file_read(&cfg);
-    tools[tool_count++] = nc_tool_file_write(&cfg);
-    tools[tool_count++] = nc_tool_memory_store(&mem);
-    tools[tool_count++] = nc_tool_memory_recall(&mem);
-    tools[tool_count++] = nc_tool_get_time();
-    tools[tool_count++] = nc_tool_sys_info();
-    tools[tool_count++] = nc_tool_calc();
-    tools[tool_count++] = nc_tool_http_fetch();
-    tools[tool_count++] = nc_tool_list_dir(&cfg);
-    tools[tool_count++] = nc_tool_env_get();
-    tools[tool_count++] = nc_tool_base64();
-    tools[tool_count++] = nc_tool_hash();
-
-    tool_count = nc_mcp_register_all(&cfg, tools, tool_count);
+    int tool_count = nc_register_default_tools(tools, &cfg, &mem);
 
     nc_agent agent;
     nc_agent_init(&agent, &cfg, &prov, tools, tool_count, &mem);

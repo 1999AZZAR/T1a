@@ -41,6 +41,11 @@ static bool cli_send(nc_channel *self, const char *to, const char *text) {
     return true;
 }
 
+static void cli_free(nc_channel *self) {
+    free(self->ctx);
+    self->ctx = NULL;
+}
+
 nc_channel nc_channel_cli(void) {
     cli_ctx *ctx = calloc(1, sizeof(cli_ctx));
     return (nc_channel){
@@ -48,6 +53,6 @@ nc_channel nc_channel_cli(void) {
         .ctx = ctx,
         .poll = cli_poll,
         .send = cli_send,
-        .free = NULL
+        .free = cli_free
     };
 }
