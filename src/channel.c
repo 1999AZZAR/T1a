@@ -13,6 +13,39 @@ typedef struct {
     long last_update_id;
 } tg_ctx;
 
+static void tg_offset_path(char *buf, size_t bufsz) {
+    char cfg_dir[1024];
+    nc_path_join(cfg_dir, sizeof(cfg_dir), nc_home_dir(), NC_CONFIG_DIR);
+    nc_path_join(buf, bufsz, cfg_dir, "telegram.offset");
+}
+
+static void tg_load_offset(tg_ctx *ctx) {
+    char path[1024];
+    tg_offset_path(path, sizeof(path));
+
+    size_t len = 0;
+    char *data = nc_read_file(path, &len);
+    if (!data) return;
+
+    ctx->last_update_id = strtol(data, NULL, 10);
+    free(data);
+}
+
+static void tg_save_offset(const tg_ctx *ctx) {
+    char cfg_dir[1024];
+    char path[1024];
+    char data[64];
+
+    nc_path_join(cfg_dir, sizeof(cfg_dir), nc_home_dir(), NC_CONFIG_DIR);
+    if (!nc_mkdir_p(cfg_dir)) return;
+
+    tg_offset_path(path, sizeof(path));
+    int len = snprintf(data, sizeof(data), "%ld\n", ctx->last_update_id);
+    if (len <= 0) return;
+
+    nc_write_file(path, data, (size_t)len);
+}
+
 static void tg_set_typing(tg_ctx *ctx, long chat_id) {
     char url[512], body[128];
     snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendChatAction", ctx->token);
@@ -100,7 +133,10 @@ static void tg_poll(nc_channel *self, nc_agent *agent) {
         for (int i = 0; i < res->array.count; i++) {
             nc_json *upd = &res->array.items[i];
             long uid = (long)nc_json_num(nc_json_get(upd, "update_id"), 0);
-            if (uid > ctx->last_update_id) ctx->last_update_id = uid;
+            if (uid > ctx->last_update_id) {
+                ctx->last_update_id = uid;
+                tg_save_offset(ctx);
+            }
 
             nc_json *msg = nc_json_get(upd, "message");
             if (!msg) continue;
@@ -149,6 +185,7 @@ static void tg_free(nc_channel *self) {
 nc_channel nc_channel_telegram(const char *token) {
     tg_ctx *ctx = calloc(1, sizeof(tg_ctx));
     nc_strlcpy(ctx->token, token, sizeof(ctx->token));
+    tg_load_offset(ctx);
     return (nc_channel){
         .name = "telegram",
         .ctx = ctx,
