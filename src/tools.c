@@ -124,7 +124,17 @@ static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_
     }
 
     char final_cmd[8192];
-    snprintf(final_cmd, sizeof(final_cmd), "%s 2>&1", command);
+    char tmp_file[128];
+    snprintf(tmp_file, sizeof(tmp_file), "/tmp/nc_cmd_%d_%d.sh", getpid(), rand() % 1000000);
+    
+    FILE *script_fp = fopen(tmp_file, "w");
+    if (script_fp) {
+        fprintf(script_fp, "#!/bin/bash\n%s\n", command);
+        fclose(script_fp);
+        snprintf(final_cmd, sizeof(final_cmd), "chmod +x %s && script -q -e /dev/null -c %s 2>&1", tmp_file, tmp_file);
+    } else {
+        snprintf(final_cmd, sizeof(final_cmd), "%s 2>&1", command);
+    }
 
     FILE *fp = popen(final_cmd, "r");
     if (!fp) {
@@ -143,6 +153,10 @@ static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_
     }
     out[total] = '\0';
     int status = pclose(fp);
+
+    if (script_fp) {
+        unlink(tmp_file);
+    }
 
     if (saved_cwd) { chdir(saved_cwd); free(saved_cwd); }
 
