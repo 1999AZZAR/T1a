@@ -30,11 +30,18 @@ static bool acp_proc_start(acp_agent *s, const char *cmd) {
         close(in_pipe[1]); close(out_pipe[0]);
         for (int i = 3; i < 1024; i++) close(i);
         
+        char final_cmd[1024];
+        if (strcmp(cmd, "codex") == 0 || strcmp(cmd, "codex --acp") == 0) {
+            strcpy(final_cmd, "codex app-server --listen stdio://");
+        } else if (strcmp(cmd, "gemini") == 0) {
+            strcpy(final_cmd, "gemini --acp");
+        } else {
+            nc_strlcpy(final_cmd, cmd, sizeof(final_cmd));
+        }
+
         char *args[64];
-        char cmd_buf[1024];
-        nc_strlcpy(cmd_buf, cmd, sizeof(cmd_buf));
         int argc = 0;
-        char *p = strtok(cmd_buf, " ");
+        char *p = strtok(final_cmd, " ");
         while (p && argc < 63) {
             args[argc++] = p;
             p = strtok(NULL, " ");
@@ -42,7 +49,6 @@ static bool acp_proc_start(acp_agent *s, const char *cmd) {
         args[argc] = NULL;
 
         execvp(args[0], args);
-        perror("execvp");
         _exit(1);
     }
     close(in_pipe[0]);
@@ -96,7 +102,7 @@ static char *acp_read_msg(acp_agent *s, nc_arena *arena) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(s->fd_out, &fds);
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 500000 }; /* 500ms */
+        struct timeval tv = { .tv_sec = 0, .tv_usec = 500000 };
         int ret = select(s->fd_out + 1, &fds, NULL, NULL, &tv);
         if (ret <= 0) break;
 
@@ -115,10 +121,10 @@ static nc_json *acp_rpc_call(acp_agent *s, const char *method, const char *param
     } else {
         snprintf(req, sizeof(req), "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"id\":%d}\n", method, id);
     }
-    if (write(s->fd_in, req, strlen(req)) < 0) return NULL;
+    write(s->fd_in, req, strlen(req));
 
     time_t start = time(NULL);
-    while (time(NULL) - start < 15) {
+    while (time(NULL) - start < 30) { /* Increased to 30s for slower OCI cold starts */
         char *line = acp_read_msg(s, arena);
         if (!line) continue;
         nc_json *root = nc_json_parse(arena, line, strlen(line));
@@ -129,16 +135,6 @@ static nc_json *acp_rpc_call(acp_agent *s, const char *method, const char *param
         }
     }
     return NULL;
-}
-
-static void acp_rpc_notify(acp_agent *s, const char *method, const char *params_json) {
-    char req[8192];
-    if (params_json) {
-        snprintf(req, sizeof(req), "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"params\":%s}\n", method, params_json);
-    } else {
-        snprintf(req, sizeof(req), "{\"jsonrpc\":\"2.0\",\"method\":\"%s\"}\n", method);
-    }
-    write(s->fd_in, req, strlen(req));
 }
 
 static void acp_rpc_send_result(acp_agent *s, int id, const char *result_json) {
@@ -172,7 +168,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     acp_agent s;
     memset(&s, 0, sizeof(s));
     if (!acp_proc_start(&s, command)) {
-        nc_strlcpy(out, "error: failed to start ACP agent", out_cap);
+        nc_strlcpy(out, "error: failed to start ACP agent process", out_cap);
         return false;
     }
 
@@ -182,7 +178,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     /* 1. Send initialize */
     const char *init_params = "{\"protocolVersion\":1,\"capabilities\":{},\"clientInfo\":{\"name\":\"noclaw-orchestrator\",\"version\":\"1.0\"}}";
     if (!acp_rpc_call(&s, "initialize", init_params, &a)) {
-        nc_strlcpy(out, "error: ACP initialize failed", out_cap);
+        nc_strlcpy(out, "error: ACP initialize failed (No JSON-RPC response from agent)", out_cap);
         nc_arena_free(&a);
         kill(s.pid, SIGTERM);
         return false;
@@ -191,14 +187,14 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     /* 2. Create session */
     nc_json *sess_res = acp_rpc_call(&s, "session/new", "{\"cwd\":\"/tmp\",\"mcpServers\":[]}", &a);
     if (!sess_res) {
-        nc_strlcpy(out, "error: ACP session/new failed", out_cap);
+        nc_strlcpy(out, "error: ACP session/new failed (Handshake succeeded but session creation failed)", out_cap);
         nc_arena_free(&a);
         kill(s.pid, SIGTERM);
         return false;
     }
     nc_str sid = nc_json_str(nc_json_get(sess_res, "sessionId"), "");
     if (sid.len == 0) {
-        nc_strlcpy(out, "error: ACP no sessionId returned", out_cap);
+        nc_strlcpy(out, "error: ACP no sessionId returned from sub-agent", out_cap);
         nc_arena_free(&a);
         kill(s.pid, SIGTERM);
         return false;
@@ -234,7 +230,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     time_t start = time(NULL);
     bool session_done = false;
 
-    while (time(NULL) - start < 180 && !session_done) {
+    while (time(NULL) - start < 300 && !session_done) {
         char *line = acp_read_msg(&s, &a);
         if (!line) continue;
         
@@ -243,13 +239,24 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
 
         nc_str method = nc_json_str(nc_json_get(root, "method"), "");
         if (nc_str_eql(method, "session/update")) {
-            nc_json *upd = nc_json_get(nc_json_get(root, "params"), "update");
+            nc_json *params = nc_json_get(root, "params");
+            nc_json *upd = nc_json_get(params, "update");
             nc_str utype = nc_json_str(nc_json_get(upd, "sessionUpdate"), "");
             
             if (nc_str_eql(utype, "agent_message_chunk")) {
                 nc_json *content = nc_json_get(upd, "content");
                 nc_str text = nc_json_str(nc_json_get(content, "text"), "");
                 if (text.len > 0) {
+                    size_t avail = out_cap - out_off - 1;
+                    size_t cp = text.len < avail ? text.len : avail;
+                    memcpy(out + out_off, text.ptr, cp);
+                    out_off += cp;
+                    out[out_off] = '\0';
+                }
+            } else if (nc_str_eql(utype, "message_delta")) {
+                 nc_json *delta = nc_json_get(upd, "delta");
+                 nc_str text = nc_json_str(nc_json_get(delta, "content"), "");
+                 if (text.len > 0) {
                     size_t avail = out_cap - out_off - 1;
                     size_t cp = text.len < avail ? text.len : avail;
                     memcpy(out + out_off, text.ptr, cp);
@@ -272,7 +279,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     kill(s.pid, SIGTERM);
     waitpid(s.pid, NULL, 0);
 
-    if (out_off == 0) nc_strlcpy(out, "ACP agent finished with no output.", out_cap);
+    if (out_off == 0) nc_strlcpy(out, "ACP agent finished with no output. (Check permissions or model state)", out_cap);
     return true;
 }
 
@@ -280,8 +287,8 @@ nc_tool nc_tool_acp_delegate(void) {
     return (nc_tool){
         .def = {
             .name = "acp_delegate",
-            .description = "Delegate a complex task to another AI agent via ACP (e.g. 'gemini --acp').",
-            .parameters_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"}},\"required\":[\"command\",\"prompt\"]}",
+            .description = "Delegate complex tasks to specialized agents (e.g. 'gemini', 'codex') via the Agent Client Protocol.",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"The agent command, e.g. 'gemini' or 'codex'.\"},\"prompt\":{\"type\":\"string\",\"description\":\"The instructions for the sub-agent.\"}},\"required\":[\"command\",\"prompt\"]}",
         },
         .ctx = NULL,
         .execute = acp_delegate_execute,
