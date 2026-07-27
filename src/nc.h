@@ -280,6 +280,7 @@ nc_tool nc_tool_hash(const nc_config *cfg);
 nc_tool nc_tool_acp_delegate(void);
 nc_tool nc_tool_reasoning(void);
 nc_tool nc_tool_tavily_search(void);
+nc_tool nc_tool_wikipedia_search(void);
 nc_tool nc_tool_guardian_memory(void *mem_ctx);
 
 #define NC_MAX_TOOLS 128

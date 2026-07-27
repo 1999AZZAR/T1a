@@ -23,6 +23,7 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     /* Built-in MCP tools (replace external Node.js MCP servers) */
     tools[n++] = nc_tool_reasoning();
     tools[n++] = nc_tool_tavily_search();
+    tools[n++] = nc_tool_wikipedia_search();
     tools[n++] = nc_tool_guardian_memory(mem->ctx);
     /* External MCP servers (still available if configured) */
     n = nc_mcp_register_all(cfg, tools, n);

@@ -202,11 +202,120 @@ nc_tool nc_tool_tavily_search(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- *  GUARDIAN MEMORY — shared persistent backend from memory.c
+ *  WIKIPEDIA SEARCH — free, no API key, clean encyclopedia content
  *
- *  Uses memory.c's gm_store_entity/gm_query/gm_forget_entity API.
- *  All data persists to JSONL file. Tool .ctx = gm_ctx pointer.
+ *  Uses Wikipedia Action API.
+ *  Returns top 5 article titles + snippets + URLs.
  * ══════════════════════════════════════════════════════════════════ */
+
+#define WIKI_API_URL "https://en.wikipedia.org/w/api.php"
+
+static void wiki_strip_html(const char *in, char *out, size_t cap) {
+    size_t j = 0;
+    for (const char *p = in; *p && j < cap-1; p++) {
+        if (*p == '<') { while (*p && *p != '>') p++; if (!*p) break; }
+        else if (*p == '&') {
+            if      (strncmp(p, "&amp;", 5) == 0)  { out[j++]='&'; p+=4; }
+            else if (strncmp(p, "&lt;", 4) == 0)   { out[j++]='<'; p+=3; }
+            else if (strncmp(p, "&gt;", 4) == 0)   { out[j++]='>'; p+=3; }
+            else if (strncmp(p, "&quot;", 6) == 0)  { out[j++]='"'; p+=5; }
+            else if (strncmp(p, "&#039;", 6) == 0) { out[j++]='\''; p+=5; }
+            else out[j++] = *p;
+        } else {
+            out[j++] = *p;
+        }
+    }
+    out[j] = '\0';
+}
+
+static bool wiki_execute(nc_tool *self, const char *json, char *out, size_t cap) {
+    (void)self;
+    nc_arena a;
+    nc_arena_init(&a, strlen(json)*2+2048);
+    nc_json *root = nc_json_parse(&a, json, strlen(json));
+    if (!root) { nc_strlcpy(out, "error: invalid args", cap); nc_arena_free(&a); return false; }
+
+    nc_str q = nc_json_str(nc_json_get(root, "query"), "");
+    if (q.len == 0) { nc_strlcpy(out, "error: missing query", cap); nc_arena_free(&a); return false; }
+
+    /* Build URL with percent-encoded query */
+    char query_enc[512];
+    size_t qe = 0;
+    for (size_t i = 0; i < q.len && qe < sizeof(query_enc)-4; i++) {
+        char c = q.ptr[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_')
+            { if (c == ' ') query_enc[qe++]='+'; else query_enc[qe++]=c; }
+        else { qe += snprintf(query_enc+qe, sizeof(query_enc)-qe, "%%%02X", (unsigned char)c); }
+    }
+    query_enc[qe] = '\0';
+
+    size_t url_sz = 1024 + qe;
+    char *url = malloc(url_sz);
+    snprintf(url, url_sz, "%s?action=query&list=search&srsearch=%s&format=json&srlimit=5&srprop=snippet|wordcount|timestamp",
+             WIKI_API_URL, query_enc);
+
+    nc_http_response resp = {0};
+    bool ok = false;
+
+    if (nc_http_get(url, NULL, 0, &resp)) {
+        if (resp.status == 200) {
+            nc_arena pa;
+            nc_arena_init(&pa, resp.body_len*2+4096);
+            nc_json *res = nc_json_parse(&pa, resp.body, resp.body_len);
+            if (res) {
+                nc_json *query_node = nc_json_get(res, "query");
+                nc_json *search = query_node ? nc_json_get(query_node, "search") : NULL;
+                int off = 0;
+
+                if (search && search->type == NC_JSON_ARRAY) {
+                    for (int i = 0; i < search->array.count && (size_t)off < cap-256; i++) {
+                        nc_json *item = &search->array.items[i];
+                        nc_str title = nc_json_str(nc_json_get(item, "title"), "");
+                        nc_str snippet = nc_json_str(nc_json_get(item, "snippet"), "");
+                        int pageid = (int)nc_json_num(nc_json_get(item, "pageid"), 0);
+
+                        /* Strip HTML tags and entities from snippet */
+                        char clean[1024];
+                        wiki_strip_html(snippet.ptr, clean, sizeof(clean));
+
+                        off += snprintf(out+off, cap-(size_t)off,
+                            "%d. %s\n   https://en.wikipedia.org/?curid=%d\n   %s\n\n",
+                            i+1, title.ptr, pageid, clean);
+                    }
+                }
+                if (off == 0) nc_strlcpy(out, "No Wikipedia results found.", cap);
+                ok = true;
+            }
+            nc_arena_free(&pa);
+        } else {
+            snprintf(out, cap, "error: HTTP %d from Wikipedia", resp.status);
+        }
+        nc_http_response_free(&resp);
+    } else {
+        nc_strlcpy(out, "error: HTTP request to Wikipedia failed", cap);
+    }
+
+    free(url);
+    nc_arena_free(&a);
+    return ok;
+}
+
+nc_tool nc_tool_wikipedia_search(void) {
+    return (nc_tool){
+        .def = {
+            .name = "wikipedia_search",
+            .description = "Search Wikipedia for encyclopedia articles on any topic. Returns top 5 results with titles, URLs, and summaries. Free, no API key needed.",
+            .parameters_json = "{"
+                "\"type\":\"object\","
+                "\"properties\":{"
+                    "\"query\":{\"type\":\"string\",\"description\":\"Search query\"}"
+                "},"
+                "\"required\":[\"query\"]"
+            "}",
+        },
+        .ctx = NULL, .execute = wiki_execute, .free = NULL,
+    };
+}
 
 static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t cap) {
     void *ctx = self ? self->ctx : NULL;
