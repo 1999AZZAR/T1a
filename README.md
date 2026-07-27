@@ -6,19 +6,17 @@ on resource-constrained hardware (Luckfox Pico Mini, ESP32-class SBCs).
 
 ## Key Features
 
-- **OpenCode provider** — Free API (`opencode.ai/zen/v1`), per-device rate limit.
+- **OpenCode provider** — Free (`opencode.ai/zen/v1`), per-device rate limit.
   Models: `deepseek-v4-flash-free` (1M ctx), `mimo-v2.5-free`, `nemotron-3-ultra-free`.
-- **3 built-in MCP tools** — Reasoning (sequential thinking), search (Tavily direct
-  HTTPS), memory (guardian entity-relation). No Node.js required.
+- **4 built-in MCP tools** — Reasoning (sequential thinking), web search (Tavily),
+  encyclopedia (Wikipedia), persistent memory (Guardian). No Node.js required.
 - **Persistent guardian memory** — JSONL-backed entity store with keyword search.
   Shared between memory backend and guardian_memory tool.
-- **16+ built-in tools** — shell, file I/O, HTTP fetch, calculator, hash, base64,
+- **16+ built-in tools** — shell, file I/O, HTTP fetch, calc, hash, base64,
   sys info, directory listing, time/timezone, env get.
-- **Telegram / CLI channels** — Long-poll for TG, interactive for CLI. Message
-  offset persistence across restarts.
-- **Caveman system prompt** — <200 token keyword-driven directive. Brevity first.
-- **Sliding window context** — 256 messages max, keep 75% on trim. 1M token
-  model context handles embedded use cases.
+- **Telegram / CLI channels** — Long-poll for TG, interactive for CLI.
+- **Caveman system prompt** — <200 token, keyword-driven.
+- **Sliding window context** — 256 messages, keep 75% on trim.
 
 ## Architecture
 
@@ -41,18 +39,14 @@ src/arena.c             Arena allocator
 
 ## Quick Start
 
+Only 2 keys needed: Telegram bot token + Tavily API key (optional).
+
 ```bash
-# Build
-make clean && make release
+# Clone & build (interactive — asks for keys)
+./build.sh
 
-# First-time setup
-./noclaw onboard \
-  --api-key "sk-..." \
-  --provider opencode \
-  --model deepseek-v4-flash-free
-
-# Run as Telegram daemon
-./noclaw agent --channel telegram
+# Run as Telegram daemon (auto-restart on crash)
+./run_t1a.sh
 
 # One-shot via CLI
 ./noclaw agent -m "Apa kabar?"
@@ -70,8 +64,8 @@ Description=T1a AI Agent
 After=network.target
 
 [Service]
-WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/noclaw agent --channel telegram
+WorkingDirectory=$PWD
+ExecStart=$PWD/run_t1a.sh
 Restart=always
 RestartSec=10
 
