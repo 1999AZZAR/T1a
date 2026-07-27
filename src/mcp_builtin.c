@@ -317,10 +317,29 @@ nc_tool nc_tool_wikipedia_search(void) {
     };
 }
 
-static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t cap) {
-    void *ctx = self ? self->ctx : NULL;
-    if (!ctx) { nc_strlcpy(out, "error: memory not initialized", cap); return false; }
+/* ══════════════════════════════════════════════════════════════════
+ *  GUARDIAN MEMORY — pure C, self-contained, no external deps
+ *
+ *  Entity-relation graph with static arrays and keyword search.
+ *  Self-contained like sequentialthinking — no dependency on memory.c.
+ * ══════════════════════════════════════════════════════════════════ */
 
+#define G_ENTS 256
+#define G_OBS  16
+#define G_LEN  512
+
+typedef struct { char n[G_LEN], t[G_LEN], o[G_OBS][G_LEN]; int oc; } g_ent;
+static g_ent g_ents[G_ENTS];
+static int g_ec = 0;
+
+static int g_find(const char *name) {
+    for (int i = 0; i < g_ec; i++)
+        if (strcmp(g_ents[i].n, name) == 0) return i;
+    return -1;
+}
+
+static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t cap) {
+    (void)self;
     nc_arena a;
     nc_arena_init(&a, strlen(json)*2+4096);
     nc_json *root = nc_json_parse(&a, json, strlen(json));
@@ -333,52 +352,88 @@ static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t 
         nc_str type = nc_json_str(nc_json_get(root, "type"), "");
         nc_str obs  = nc_json_str(nc_json_get(root, "observation"), "");
         if (name.len == 0) { nc_strlcpy(out, "error: missing name", cap); nc_arena_free(&a); return false; }
-        char nbuf[256], tbuf[64], obuf[1024];
-        size_t nl = name.len < sizeof(nbuf)-1 ? name.len : sizeof(nbuf)-1;
-        memcpy(nbuf, name.ptr, nl); nbuf[nl] = '\0';
-        size_t tl = type.len < sizeof(tbuf)-1 ? type.len : sizeof(tbuf)-1;
-        memcpy(tbuf, type.ptr, tl); tbuf[tl] = '\0';
-        size_t ol = obs.len < sizeof(obuf)-1 ? obs.len : sizeof(obuf)-1;
-        memcpy(obuf, obs.ptr, ol); obuf[ol] = '\0';
-        snprintf(out, cap, gm_store_entity(ctx, nbuf, tbuf, obuf) ? "Stored: %s" : "error: store failed", nbuf);
+
+        int idx = g_find(name.ptr);
+        if (idx < 0) {
+            if (g_ec >= G_ENTS) { nc_strlcpy(out, "error: limit reached", cap); nc_arena_free(&a); return false; }
+            idx = g_ec++;
+            size_t nl = name.len < G_LEN-1 ? name.len : G_LEN-1;
+            memcpy(g_ents[idx].n, name.ptr, nl); g_ents[idx].n[nl] = '\0';
+            g_ents[idx].t[0] = '\0';
+        }
+        if (type.len > 0) {
+            size_t tl = type.len < G_LEN-1 ? type.len : G_LEN-1;
+            memcpy(g_ents[idx].t, type.ptr, tl); g_ents[idx].t[tl] = '\0';
+        }
+        if (obs.len > 0 && g_ents[idx].oc < G_OBS) {
+            size_t ol = obs.len < G_LEN-1 ? obs.len : G_LEN-1;
+            memcpy(g_ents[idx].o[g_ents[idx].oc], obs.ptr, ol);
+            g_ents[idx].o[g_ents[idx].oc][ol] = '\0';
+            g_ents[idx].oc++;
+        }
+        snprintf(out, cap, "Stored: %s (%d obs)", g_ents[idx].n, g_ents[idx].oc);
 
     } else if (nc_str_eql(op, "query")) {
         nc_str query = nc_json_str(nc_json_get(root, "query"), "");
         if (query.len == 0) { nc_strlcpy(out, "error: missing query", cap); nc_arena_free(&a); return false; }
-        char qbuf[256];
-        size_t ql = query.len < sizeof(qbuf)-1 ? query.len : sizeof(qbuf)-1;
-        memcpy(qbuf, query.ptr, ql); qbuf[ql] = '\0';
-        gm_query(ctx, qbuf, out, cap);
+        char q[256];
+        size_t ql = query.len < sizeof(q)-1 ? query.len : sizeof(q)-1;
+        memcpy(q, query.ptr, ql); q[ql] = '\0';
+        for (char *p = q; *p; p++) *p = tolower((unsigned char)*p);
+
+        int off = 0;
+        for (int i = 0; i < g_ec && (size_t)off < cap-128; i++) {
+            char nl[G_LEN]; size_t nl_len = strlen(g_ents[i].n);
+            for (size_t j = 0; j < nl_len; j++) nl[j] = tolower((unsigned char)g_ents[i].n[j]);
+            nl[nl_len] = '\0';
+
+            bool match = (strstr(nl, q) != NULL);
+            if (!match)
+                for (int k = 0; k < g_ents[i].oc; k++) {
+                    char ol[G_LEN]; size_t ol_len = strlen(g_ents[i].o[k]);
+                    for (size_t j = 0; j < ol_len; j++) ol[j] = tolower((unsigned char)g_ents[i].o[k][j]);
+                    ol[ol_len] = '\0';
+                    if (strstr(ol, q)) { match = true; break; }
+                }
+
+            if (match) {
+                off += snprintf(out+off, cap-(size_t)off, "-%s (%s):\n",
+                    g_ents[i].n, g_ents[i].t[0]?g_ents[i].t:"entity");
+                for (int k = 0; k < g_ents[i].oc; k++)
+                    off += snprintf(out+off, cap-(size_t)off, " - %s\n", g_ents[i].o[k]);
+            }
+        }
+        if (off == 0) nc_strlcpy(out, "No match.", cap);
 
     } else if (nc_str_eql(op, "forget")) {
         nc_str name = nc_json_str(nc_json_get(root, "name"), "");
         if (name.len == 0) { nc_strlcpy(out, "error: missing name", cap); nc_arena_free(&a); return false; }
-        char nbuf[256];
-        size_t nl = name.len < sizeof(nbuf)-1 ? name.len : sizeof(nbuf)-1;
-        memcpy(nbuf, name.ptr, nl); nbuf[nl] = '\0';
-        snprintf(out, cap, gm_forget_entity(ctx, nbuf) ? "Forgot: %s" : "Not found: %s", nbuf);
+        int idx = g_find(name.ptr);
+        if (idx >= 0) {
+            for (int j = idx; j < g_ec-1; j++) g_ents[j] = g_ents[j+1];
+            g_ec--;
+            snprintf(out, cap, "Forgot: %s", name.ptr);
+        } else snprintf(out, cap, "Not found: %s", name.ptr);
 
     } else if (nc_str_eql(op, "list")) {
-        int off = snprintf(out, cap, "Entities: %d\n", gm_entity_count(ctx));
-        for (int i = 0; (size_t)off < cap-128; i++) {
-            struct gm_entity *e = gm_entity_at(ctx, i);
-            if (!e) break;
+        int off = snprintf(out, cap, "Entities: %d\n", g_ec);
+        for (int i = 0; i < g_ec && (size_t)off < cap-128; i++)
             off += snprintf(out+off, cap-(size_t)off, "%d. %s (%s) — %d obs\n",
-                i+1, e->name, e->type[0]?e->type:"entity", e->obs_count);
-        }
+                i+1, g_ents[i].n, g_ents[i].t[0]?g_ents[i].t:"entity", g_ents[i].oc);
     } else {
-        snprintf(out, cap, "error: unknown op '%.*s'", (int)op.len, op.ptr);
+        nc_str op_s = nc_json_str(nc_json_get(root, "operation"), "");
+        snprintf(out, cap, "error: unknown op '%.*s'", (int)op_s.len, op_s.ptr);
     }
 
     nc_arena_free(&a);
     return true;
 }
 
-nc_tool nc_tool_guardian_memory(void *mem_ctx) {
+nc_tool nc_tool_guardian_memory(void) {
     return (nc_tool){
         .def = {
             .name = "guardian_memory",
-            .description = "Persistent entity memory. Ops: store (name+obs), query (keyword), forget, list.",
+            .description = "Entity-relation memory. Ops: store (name+obs), query (keyword), forget, list.",
             .parameters_json = "{"
                 "\"type\":\"object\","
                 "\"properties\":{"
@@ -391,8 +446,6 @@ nc_tool nc_tool_guardian_memory(void *mem_ctx) {
                 "\"required\":[\"operation\"]"
             "}",
         },
-        .ctx = mem_ctx,
-        .execute = guardian_execute,
-        .free = NULL,
+        .ctx = NULL, .execute = guardian_execute, .free = NULL,
     };
 }

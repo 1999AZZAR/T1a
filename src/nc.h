@@ -281,7 +281,7 @@ nc_tool nc_tool_acp_delegate(void);
 nc_tool nc_tool_reasoning(void);
 nc_tool nc_tool_tavily_search(void);
 nc_tool nc_tool_wikipedia_search(void);
-nc_tool nc_tool_guardian_memory(void *mem_ctx);
+nc_tool nc_tool_guardian_memory(void);
 
 #define NC_MAX_TOOLS 128
 
