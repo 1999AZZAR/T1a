@@ -279,12 +279,32 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
             nc_json *message = nc_json_get(choice0, "message");
             if (message) {
                 nc_json *content_node = nc_json_get(message, "content");
+                bool got_content = false;
                 if (content_node && content_node->type == NC_JSON_STRING) {
                     nc_str content = content_node->string;
-                    size_t cplen = content.len < sizeof(resp->content) - 1
-                        ? content.len : sizeof(resp->content) - 1;
-                    memcpy(resp->content, content.ptr, cplen);
-                    resp->content[cplen] = '\0';
+                    if (content.len > 0) {
+                        size_t cplen = content.len < sizeof(resp->content) - 1
+                            ? content.len : sizeof(resp->content) - 1;
+                        memcpy(resp->content, content.ptr, cplen);
+                        resp->content[cplen] = '\0';
+                        got_content = true;
+                    }
+                }
+
+                /* Reasoning models (DeepSeek, MiMo, Nemotron) put response
+                   in 'reasoning_content' or 'reasoning' when 'content' is null.
+                   Fall back to those fields. */
+                if (!got_content) {
+                    nc_json *reasoning = nc_json_get(message, "reasoning_content");
+                    if (!reasoning || reasoning->type != NC_JSON_STRING)
+                        reasoning = nc_json_get(message, "reasoning");
+                    if (reasoning && reasoning->type == NC_JSON_STRING) {
+                        nc_str rtext = reasoning->string;
+                        size_t cplen = rtext.len < sizeof(resp->content) - 1
+                            ? rtext.len : sizeof(resp->content) - 1;
+                        memcpy(resp->content, rtext.ptr, cplen);
+                        resp->content[cplen] = '\0';
+                    }
                 }
 
                 nc_json *tc = nc_json_get(message, "tool_calls");
