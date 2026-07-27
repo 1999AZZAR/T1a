@@ -23,7 +23,7 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     /* Built-in MCP tools (replace external Node.js MCP servers) */
     tools[n++] = nc_tool_reasoning();
     tools[n++] = nc_tool_tavily_search();
-    tools[n++] = nc_tool_guardian_memory();
+    tools[n++] = nc_tool_guardian_memory(mem->ctx);
     /* External MCP servers (still available if configured) */
     n = nc_mcp_register_all(cfg, tools, n);
     return n;
@@ -51,8 +51,8 @@ int nc_cmd_agent(int argc, char **argv) {
     nc_provider prov = nc_provider_from_config(&cfg);
 
     char mem_path[1024];
-    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "memories.tsv");
-    nc_memory mem = nc_memory_flat(mem_path);
+    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "guardian.jsonl");
+    nc_memory mem = nc_memory_guardian(mem_path);
     nc_tool tools[NC_MAX_TOOLS];
     int tool_count = nc_register_default_tools(tools, &cfg, &mem);
 

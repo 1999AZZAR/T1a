@@ -280,7 +280,7 @@ nc_tool nc_tool_hash(const nc_config *cfg);
 nc_tool nc_tool_acp_delegate(void);
 nc_tool nc_tool_reasoning(void);
 nc_tool nc_tool_tavily_search(void);
-nc_tool nc_tool_guardian_memory(void);
+nc_tool nc_tool_guardian_memory(void *mem_ctx);
 
 #define NC_MAX_TOOLS 128
 
@@ -289,7 +289,26 @@ int nc_mcp_register_all(const nc_config *cfg, nc_tool *tools, int start_idx);
 void nc_mcp_cleanup(void);
 
 nc_memory nc_memory_noop(void);
-nc_memory nc_memory_flat(const char *path);
+nc_memory nc_memory_guardian(const char *path);
+
+/* Guardian memory entity struct (shared between memory.c and mcp_builtin.c) */
+#define GM_MAX_OBS 16
+#define GM_FIELD_LEN 512
+
+typedef struct gm_entity {
+    char name[GM_FIELD_LEN];
+    char type[GM_FIELD_LEN];
+    char observations[GM_MAX_OBS][GM_FIELD_LEN];
+    int  obs_count;
+    long created_at;
+} gm_entity;
+
+/* Guardian memory access functions */
+int  gm_entity_count(void *ctx);
+gm_entity *gm_entity_at(void *ctx, int idx);
+bool gm_store_entity(void *ctx, const char *name, const char *type, const char *obs);
+int  gm_query(void *ctx, const char *query, char *out, size_t out_cap);
+bool gm_forget_entity(void *ctx, const char *name);
 
 int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *mem);
 

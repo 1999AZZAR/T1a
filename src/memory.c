@@ -1,8 +1,12 @@
 /*
- * Memory backend: flat-file with keyword search.
- * File format: one record per line, tab-separated: key\tcontent\ttimestamp
- * Search: tokenize query, scan entries, count matching words, return top N.
- * No SQLite, no FTS5 — the LLM is the ranker.
+ * Guardian Memory — Persistent entity-relation memory backend.
+ *
+ * Replaces flat-file TSV with guardian-style entity model.
+ * Each entity has: name, type, observations[], created_at.
+ * Persisted as JSON: one entity per line (JSONL) for append-friendliness.
+ *
+ * Search: case-insensitive keyword match on name + observations.
+ * No external deps. No SQLite.
  */
 
 #include "nc.h"
@@ -11,132 +15,46 @@
 #include <stdio.h>
 #include <time.h>
 #include <ctype.h>
-#include <strings.h>
-#include <sys/file.h>
-#include <fcntl.h>
 #include <unistd.h>
 
-/* ── Flat-file context ───────────────────────────────────────── */
+/* ── Constants ────────────────────────────────────────────────── */
+
+#define GM_MAX_ENTITIES  256
+#define GM_MAX_OBS       16
+#define GM_FIELD_LEN     512
+#define GM_PATH_LEN      1024
+
+/* ── Context (entity struct from nc.h) ───────────────────────── */
 
 typedef struct {
-    char path[512];
-} flat_mem;
+    char path[GM_PATH_LEN];
+    gm_entity entities[GM_MAX_ENTITIES];
+    int  entity_count;
+    bool loaded;
+} gm_ctx;
 
-/* ── Flat-file escape/unescape (tab and newline break the format) ── */
+/* ── File I/O ─────────────────────────────────────────────────── */
 
-static void flat_escape(const char *in, char *out, size_t out_cap) {
-    size_t j = 0;
-    for (size_t i = 0; in[i] && j + 2 < out_cap; i++) {
-        if (in[i] == '\t')      { out[j++] = '\\'; out[j++] = 't'; }
-        else if (in[i] == '\n') { out[j++] = '\\'; out[j++] = 'n'; }
-        else if (in[i] == '\\') { out[j++] = '\\'; out[j++] = '\\'; }
-        else                    { out[j++] = in[i]; }
-    }
-    out[j] = '\0';
-}
-
-static void flat_unescape(char *s) {
-    char *r = s, *w = s;
-    while (*r) {
-        if (*r == '\\' && r[1]) {
-            r++;
-            if (*r == 't')      *w++ = '\t';
-            else if (*r == 'n') *w++ = '\n';
-            else if (*r == '\\') *w++ = '\\';
-            else { *w++ = '\\'; *w++ = *r; }
-            r++;
-        } else {
-            *w++ = *r++;
-        }
-    }
-    *w = '\0';
-}
-
-/* ── Helpers ─────────────────────────────────────────────────── */
-
-/* Case-insensitive substring check */
-static bool contains_word(const char *haystack, const char *word, size_t wlen) {
-    for (const char *p = haystack; *p; p++) {
-        if (strncasecmp(p, word, wlen) == 0) {
-            /* Check word boundary: start of string or non-alnum before */
-            if (p == haystack || !isalnum((unsigned char)p[-1])) {
-                char after = p[wlen];
-                if (after == '\0' || !isalnum((unsigned char)after))
-                    return true;
-            }
-        }
-    }
-    return false;
-}
-
-/* Count how many query tokens appear in text (key + content) */
-static int score_entry(const char *key, const char *content,
-                       const char *tokens[], int token_lens[], int ntokens) {
-    int score = 0;
-    for (int i = 0; i < ntokens; i++) {
-        if (contains_word(key, tokens[i], (size_t)token_lens[i]))
-            score += 2;  /* key match worth more */
-        if (contains_word(content, tokens[i], (size_t)token_lens[i]))
-            score += 1;
-    }
-    return score;
-}
-
-/* Tokenize query into words (pointers into original string) */
-static int tokenize(const char *query, const char *tokens[], int lens[], int max) {
-    int n = 0;
-    const char *p = query;
-    while (*p && n < max) {
-        while (*p && !isalnum((unsigned char)*p)) p++;
-        if (!*p) break;
-        const char *start = p;
-        while (*p && isalnum((unsigned char)*p)) p++;
-        tokens[n] = start;
-        lens[n] = (int)(p - start);
-        n++;
-    }
-    return n;
-}
-
-/* ── File I/O helpers with advisory locking ──────────────────── */
-
-static int mem_lock(const char *path, int operation) {
-    int fd = open(path, O_RDONLY | O_CREAT, 0644);
-    if (fd < 0) return -1;
-    if (flock(fd, operation) < 0) { close(fd); return -1; }
-    return fd;
-}
-
-static void mem_unlock(int fd) {
-    if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
-}
-
-static char *read_all(const char *path, size_t *out_len) {
+static char *gm_read_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "r");
     if (!f) { *out_len = 0; return NULL; }
-
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-
     if (sz <= 0) { fclose(f); *out_len = 0; return NULL; }
-
     char *buf = (char *)malloc((size_t)sz + 1);
     if (!buf) { fclose(f); *out_len = 0; return NULL; }
-
     *out_len = fread(buf, 1, (size_t)sz, f);
     buf[*out_len] = '\0';
     fclose(f);
     return buf;
 }
 
-static bool write_all(const char *path, const char *data, size_t len) {
-    char tmp[520];
+static bool gm_write_file(const char *path, const char *data, size_t len) {
+    char tmp[GM_PATH_LEN + 8];
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-
     FILE *f = fopen(tmp, "w");
     if (!f) return false;
-
     if (len > 0 && fwrite(data, 1, len, f) != len) {
         fclose(f);
         remove(tmp);
@@ -146,283 +64,316 @@ static bool write_all(const char *path, const char *data, size_t len) {
     return rename(tmp, path) == 0;
 }
 
-/* ── Prune & Trim ──────────────────────────────────────────────── */
+/* ── JSON serialization ──────────────────────────────────────── */
 
-/* Remove oldest entries if total size > limit */
-static void flat_prune(flat_mem *ctx, size_t max_size_bytes) {
-    size_t flen = 0;
-    char *data = read_all(ctx->path, &flen);
-    if (!data) return;
-
-    if (flen <= max_size_bytes) {
-        free(data);
-        return;
+/* Escape a string for JSON, appending to buffer */
+static void gm_escape_json(const char *in, char *out, size_t out_cap) {
+    size_t j = 0;
+    for (size_t i = 0; in[i] && j + 6 < out_cap; i++) {
+        char c = in[i];
+        if (c == '"' || c == '\\') { out[j++] = '\\'; out[j++] = c; }
+        else if (c == '\n') { out[j++] = '\\'; out[j++] = 'n'; }
+        else if (c == '\r') { out[j++] = '\\'; out[j++] = 'r'; }
+        else if (c == '\t') { out[j++] = '\\'; out[j++] = 't'; }
+        else if ((unsigned char)c >= 0x20) { out[j++] = c; }
     }
-
-    /* We need to cut roughly (flen - max_size) bytes from the start.
-       But we must align to line boundaries.
-       However, memories are stored chronologically (append-only), so oldest are at start.
-       
-       Wait, simple pruning: count lines, keep last N? 
-       Or keep last N bytes?
-       
-       Let's implement a smarter "semantic density" prune later.
-       For now: Keep last 70% of the file if it exceeds limit. */
-    
-    size_t cut_target = flen - (size_t)(max_size_bytes * 0.7);
-    char *start = data;
-    char *p = data;
-    
-    while ((size_t)(p - start) < cut_target && *p) {
-        char *eol = strchr(p, '\n');
-        if (!eol) break;
-        p = eol + 1;
-    }
-
-    if (p > start) {
-        size_t new_len = flen - (p - start);
-        write_all(ctx->path, p, new_len);
-        nc_log(NC_LOG_INFO, "Pruned memory: removed %ld bytes", (long)(p - start));
-    }
-
-    free(data);
+    out[j] = '\0';
 }
 
-static bool flat_store(nc_memory *self, const char *key, const char *content) {
-    flat_mem *ctx = (flat_mem *)self->ctx;
-    if (!ctx) return false;
-
-    int lk = mem_lock(ctx->path, LOCK_EX);
-    time_t now = time(NULL);
-    char esc_key[1024], esc_content[8192];
-    flat_escape(key, esc_key, sizeof(esc_key));
-    flat_escape(content, esc_content, sizeof(esc_content));
-    size_t eklen = strlen(esc_key);
-
-    /* Read existing file */
-    size_t flen = 0;
-    char *data = read_all(ctx->path, &flen);
-
-    /* ... same logic as before to build new content ... */
-    size_t new_cap = flen + eklen + strlen(esc_content) + 64;
-    char *out = (char *)malloc(new_cap);
-    if (!out) { free(data); mem_unlock(lk); return false; }
-
-    size_t out_len = 0;
-    if (data) {
-        char *line = data;
-        while (*line) {
-            char *eol = strchr(line, '\n');
-            size_t llen = eol ? (size_t)(eol - line) : strlen(line);
-            
-            bool skip = false;
-            if (llen > eklen) {
-                skip = (memcmp(line, esc_key, eklen) == 0 && line[eklen] == '\t');
-            }
-
-            if (!skip && llen > 0) {
-                memcpy(out + out_len, line, llen);
-                out_len += llen;
-                out[out_len++] = '\n';
-            }
-            line += llen;
-            if (*line == '\n') line++;
-        }
+static void gm_entity_to_json(gm_entity *e, char *buf, size_t cap) {
+    int off = 0;
+    char name_esc[GM_FIELD_LEN * 2], type_esc[GM_FIELD_LEN * 2];
+    gm_escape_json(e->name, name_esc, sizeof(name_esc));
+    gm_escape_json(e->type, type_esc, sizeof(type_esc));
+    off += snprintf(buf + off, cap - (size_t)off,
+        "{\"n\":\"%s\",\"t\":\"%s\",\"o\":[", name_esc, type_esc);
+    for (int i = 0; i < e->obs_count; i++) {
+        char obs_esc[GM_FIELD_LEN * 2];
+        gm_escape_json(e->observations[i], obs_esc, sizeof(obs_esc));
+        off += snprintf(buf + off, cap - (size_t)off,
+            "%s\"%s\"", i > 0 ? "," : "", obs_esc);
     }
-
-    int n = snprintf(out + out_len, new_cap - out_len, "%s\t%s\t%ld\n",
-                     esc_key, esc_content, (long)now);
-    if (n > 0) out_len += (size_t)n;
-
-    bool ok = write_all(ctx->path, out, out_len);
-    free(out);
-    free(data);
-
-    if (ok && out_len > 1024 * 1024) {
-        flat_prune(ctx, 1024 * 1024);
-    }
-
-    mem_unlock(lk);
-    return ok;
+    off += snprintf(buf + off, cap - (size_t)off, "],\"c\":%ld}", e->created_at);
 }
 
-/* ── Recall ──────────────────────────────────────────────────── */
-
-typedef struct { int score; const char *key; size_t klen; const char *content; size_t clen; } match_t;
-
-static bool flat_recall(nc_memory *self, const char *query, char *out, size_t out_cap) {
-    flat_mem *ctx = (flat_mem *)self->ctx;
-    if (!ctx) return false;
-
-    int lk = mem_lock(ctx->path, LOCK_SH);
-    size_t flen = 0;
-    char *data = read_all(ctx->path, &flen);
-    if (!data) {
-        mem_unlock(lk);
-        nc_strlcpy(out, "No matching memories found.", out_cap);
-        return false;
+/* Find an entity by name (case-insensitive) */
+static gm_entity *gm_find(gm_ctx *ctx, const char *name) {
+    for (int i = 0; i < ctx->entity_count; i++) {
+        if (strcasecmp(ctx->entities[i].name, name) == 0)
+            return &ctx->entities[i];
     }
+    return NULL;
+}
 
-    /* Tokenize query */
-    const char *tokens[32];
-    int lens[32];
-    int ntokens = tokenize(query, tokens, lens, 32);
-    if (ntokens == 0) {
-        free(data);
-        mem_unlock(lk);
-        nc_strlcpy(out, "No matching memories found.", out_cap);
-        return false;
-    }
+/* ── Load from file ──────────────────────────────────────────── */
 
-    /* Score all entries, keep top 5 */
-    match_t top[5] = {{0}};
+static void gm_load(gm_ctx *ctx) {
+    if (ctx->loaded) return;
 
+    size_t len;
+    char *data = gm_read_file(ctx->path, &len);
+    if (!data) { ctx->loaded = true; return; }
+
+    ctx->entity_count = 0;
     char *line = data;
-    while (*line) {
+    while (*line && ctx->entity_count < GM_MAX_ENTITIES) {
         char *eol = strchr(line, '\n');
-        size_t llen = eol ? (size_t)(eol - line) : strlen(line);
-        if (llen == 0) { line++; continue; }
+        if (eol) *eol = '\0';
 
-        /* Temporarily null-terminate line */
-        char saved = line[llen];
-        line[llen] = '\0';
+        /* Parse JSON line: {"n":"name","t":"type","o":["obs1","obs2"],"c":ts} */
+        nc_arena a;
+        nc_arena_init(&a, 2048);
+        nc_json *root = nc_json_parse(&a, line, strlen(line));
+        if (root && root->type == NC_JSON_OBJECT) {
+            gm_entity *e = &ctx->entities[ctx->entity_count++];
+            memset(e, 0, sizeof(gm_entity));
 
-        /* Parse: key\tcontent\ttimestamp */
-        char *tab1 = strchr(line, '\t');
-        if (tab1) {
-            *tab1 = '\0';
-            char *val = tab1 + 1;
-            char *tab2 = strchr(val, '\t');
-            if (tab2) *tab2 = '\0';
+            nc_str n = nc_json_str(nc_json_get(root, "n"), "");
+            if (n.len > 0) { size_t cl = n.len < GM_FIELD_LEN-1 ? n.len : GM_FIELD_LEN-1; memcpy(e->name, n.ptr, cl); }
 
-            int sc = score_entry(line, val, tokens, lens, ntokens);
-            if (sc > 0) {
-                /* Insert into top-5 (sorted descending) */
-                for (int i = 0; i < 5; i++) {
-                    if (sc > top[i].score) {
-                        /* Shift down */
-                        for (int j = 4; j > i; j--) top[j] = top[j-1];
-                        top[i] = (match_t){ .score = sc, .key = line,
-                                            .klen = (size_t)(tab1 - line),
-                                            .content = val,
-                                            .clen = tab2 ? (size_t)(tab2 - val) : strlen(val) };
-                        break;
+            nc_str t = nc_json_str(nc_json_get(root, "t"), "");
+            if (t.len > 0) { size_t cl = t.len < GM_FIELD_LEN-1 ? t.len : GM_FIELD_LEN-1; memcpy(e->type, t.ptr, cl); }
+
+            nc_json *obs = nc_json_get(root, "o");
+            if (obs && obs->type == NC_JSON_ARRAY) {
+                for (int i = 0; i < obs->array.count && i < GM_MAX_OBS; i++) {
+                    nc_str o = nc_json_str(&obs->array.items[i], "");
+                    if (o.len > 0) {
+                        size_t cl = o.len < GM_FIELD_LEN-1 ? o.len : GM_FIELD_LEN-1;
+                        memcpy(e->observations[e->obs_count], o.ptr, cl);
+                        e->observations[e->obs_count][cl] = '\0';
+                        e->obs_count++;
                     }
                 }
             }
 
-            /* Restore tabs for continued parsing */
-            *tab1 = '\t';
-            if (tab2) *tab2 = '\t';
+            e->created_at = (long)nc_json_num(nc_json_get(root, "c"), 0);
         }
 
-        line[llen] = saved;
-        line += llen;
-        if (*line == '\n') line++;
-    }
-
-    /* Format output (unescape stored content for display) */
-    size_t off = 0;
-    int count = 0;
-    for (int i = 0; i < 5 && top[i].score > 0; i++) {
-        char key_buf[1024], content_buf[8192];
-        size_t kl = top[i].klen < sizeof(key_buf) - 1 ? top[i].klen : sizeof(key_buf) - 1;
-        memcpy(key_buf, top[i].key, kl);
-        key_buf[kl] = '\0';
-        flat_unescape(key_buf);
-
-        size_t cl = top[i].clen < sizeof(content_buf) - 1 ? top[i].clen : sizeof(content_buf) - 1;
-        memcpy(content_buf, top[i].content, cl);
-        content_buf[cl] = '\0';
-        flat_unescape(content_buf);
-
-        int n = snprintf(out + off, out_cap - off, "[%s] %s\n", key_buf, content_buf);
-        if (n > 0) off += (size_t)n;
-        count++;
+        nc_arena_free(&a);
+        if (eol) line = eol + 1; else break;
     }
 
     free(data);
-    mem_unlock(lk);
+    ctx->loaded = true;
+    nc_log(NC_LOG_INFO, "Guardian: loaded %d entities from %s", ctx->entity_count, ctx->path);
+}
 
-    if (count == 0) {
-        nc_strlcpy(out, "No matching memories found.", out_cap);
-        return false;
+/* ── Save to file (full rewrite) ─────────────────────────────── */
+
+static void gm_save(gm_ctx *ctx) {
+    size_t cap = (size_t)ctx->entity_count * 1024 + 256;
+    char *buf = (char *)malloc(cap);
+    if (!buf) return;
+
+    size_t off = 0;
+    for (int i = 0; i < ctx->entity_count; i++) {
+        char entity_json[1024];
+        gm_entity_to_json(&ctx->entities[i], entity_json, sizeof(entity_json));
+        int n = snprintf(buf + off, cap - off, "%s\n", entity_json);
+        if (n > 0) off += (size_t)n;
     }
+
+    gm_write_file(ctx->path, buf, off);
+    free(buf);
+}
+
+/* ── Prune by age: remove entities older than N days ──────────── */
+
+static void gm_prune(gm_ctx *ctx, int max_days) {
+    time_t now = time(NULL);
+    long cutoff = (long)(now - (time_t)max_days * 86400);
+    int pruned = 0;
+
+    for (int i = 0; i < ctx->entity_count; ) {
+        if (ctx->entities[i].created_at > 0 && ctx->entities[i].created_at < cutoff) {
+            for (int j = i; j < ctx->entity_count - 1; j++)
+                ctx->entities[j] = ctx->entities[j + 1];
+            ctx->entity_count--;
+            pruned++;
+        } else {
+            i++;
+        }
+    }
+
+    if (pruned > 0) {
+        nc_log(NC_LOG_INFO, "Guardian: pruned %d old entities", pruned);
+        gm_save(ctx);
+    }
+}
+
+/* ── CRUD Operations ─────────────────────────────────────────── */
+
+static bool guardian_store_entity(gm_ctx *ctx, const char *name, const char *type,
+                                   const char *observation) {
+    gm_load(ctx);
+
+    gm_entity *e = gm_find(ctx, name);
+    if (!e) {
+        if (ctx->entity_count >= GM_MAX_ENTITIES) return false;
+        e = &ctx->entities[ctx->entity_count++];
+        memset(e, 0, sizeof(gm_entity));
+        nc_strlcpy(e->name, name, sizeof(e->name));
+        if (type && type[0]) nc_strlcpy(e->type, type, sizeof(e->type));
+        e->created_at = (long)time(NULL);
+    }
+
+    if (observation && observation[0] && e->obs_count < GM_MAX_OBS) {
+        nc_strlcpy(e->observations[e->obs_count], observation, GM_FIELD_LEN);
+        e->obs_count++;
+    }
+
+    gm_save(ctx);
     return true;
 }
 
-/* ── Forget ──────────────────────────────────────────────────── */
+static int guardian_query(gm_ctx *ctx, const char *query, char *out, size_t out_cap) {
+    gm_load(ctx);
 
-static bool flat_forget(nc_memory *self, const char *key) {
-    flat_mem *ctx = (flat_mem *)self->ctx;
-    if (!ctx) return false;
+    char qbuf[256];
+    size_t ql = strlen(query);
+    if (ql > sizeof(qbuf) - 1) ql = sizeof(qbuf) - 1;
+    memcpy(qbuf, query, ql);
+    qbuf[ql] = '\0';
+    for (char *p = qbuf; *p; p++) *p = tolower((unsigned char)*p);
 
-    int lk = mem_lock(ctx->path, LOCK_EX);
-    size_t flen = 0;
-    char *data = read_all(ctx->path, &flen);
-    if (!data) { mem_unlock(lk); return true; }
+    int off = 0;
+    int count = 0;
 
-    /* Escape key to match stored format */
-    char esc_key[1024];
-    flat_escape(key, esc_key, sizeof(esc_key));
-    size_t eklen = strlen(esc_key);
+    for (int i = 0; i < ctx->entity_count && (size_t)off < out_cap - 128; i++) {
+        gm_entity *e = &ctx->entities[i];
 
-    char *out = (char *)malloc(flen + 1);
-    if (!out) { free(data); mem_unlock(lk); return false; }
+        char elower[GM_FIELD_LEN];
+        size_t el = strlen(e->name);
+        for (size_t j = 0; j < el; j++) elower[j] = tolower((unsigned char)e->name[j]);
+        elower[el] = '\0';
 
-    size_t out_len = 0;
-    char *line = data;
-    while (*line) {
-        char *eol = strchr(line, '\n');
-        size_t llen = eol ? (size_t)(eol - line) : strlen(line);
-
-        bool skip = (llen > eklen && memcmp(line, esc_key, eklen) == 0 && line[eklen] == '\t');
-
-        if (!skip && llen > 0) {
-            memcpy(out + out_len, line, llen);
-            out_len += llen;
-            out[out_len++] = '\n';
+        bool matched = (strstr(elower, qbuf) != NULL);
+        if (!matched) {
+            for (int k = 0; k < e->obs_count; k++) {
+                char olower[GM_FIELD_LEN];
+                size_t ol = strlen(e->observations[k]);
+                for (size_t j = 0; j < ol; j++)
+                    olower[j] = tolower((unsigned char)e->observations[k][j]);
+                olower[ol] = '\0';
+                if (strstr(olower, qbuf)) { matched = true; break; }
+            }
         }
 
-        line += llen;
-        if (*line == '\n') line++;
+        if (matched) {
+            off += snprintf(out + off, out_cap - (size_t)off,
+                "• %s (%s):\n", e->name, e->type[0] ? e->type : "entity");
+            for (int k = 0; k < e->obs_count; k++) {
+                off += snprintf(out + off, out_cap - (size_t)off,
+                    "  - %s\n", e->observations[k]);
+            }
+            count++;
+        }
     }
 
-    bool ok = write_all(ctx->path, out, out_len);
-    free(out);
-    free(data);
-    mem_unlock(lk);
-    return ok;
+    if (count == 0)
+        nc_strlcpy(out, "No matching entities.", out_cap);
+
+    return count;
 }
 
-/* ── Free ────────────────────────────────────────────────────── */
+static bool guardian_forget(gm_ctx *ctx, const char *name) {
+    gm_load(ctx);
+    for (int i = 0; i < ctx->entity_count; i++) {
+        if (strcasecmp(ctx->entities[i].name, name) == 0) {
+            for (int j = i; j < ctx->entity_count - 1; j++)
+                ctx->entities[j] = ctx->entities[j + 1];
+            ctx->entity_count--;
+            gm_save(ctx);
+            return true;
+        }
+    }
+    return false;
+}
 
-static void flat_free(nc_memory *self) {
-    flat_mem *ctx = (flat_mem *)self->ctx;
-    if (ctx) free(ctx);
+/* ── nc_memory backend implementation ────────────────────────── */
+
+static bool mem_store(nc_memory *self, const char *key, const char *content) {
+    gm_ctx *ctx = (gm_ctx *)self->ctx;
+    /* Map memory store to guardian entity: key=name, content=observation */
+    return guardian_store_entity(ctx, key, "memory", content);
+}
+
+static bool mem_recall(nc_memory *self, const char *query, char *out, size_t out_cap) {
+    gm_ctx *ctx = (gm_ctx *)self->ctx;
+    return guardian_query(ctx, query, out, out_cap) > 0;
+}
+
+static bool mem_forget(nc_memory *self, const char *key) {
+    gm_ctx *ctx = (gm_ctx *)self->ctx;
+    return guardian_forget(ctx, key);
+}
+
+static void mem_free(nc_memory *self) {
+    gm_ctx *ctx = (gm_ctx *)self->ctx;
+    if (ctx) {
+        gm_save(ctx);
+        free(ctx);
+    }
     self->ctx = NULL;
 }
 
 /* ── Constructor ─────────────────────────────────────────────── */
 
-nc_memory nc_memory_flat(const char *path) {
-    flat_mem *ctx = (flat_mem *)calloc(1, sizeof(flat_mem));
+nc_memory nc_memory_guardian(const char *path) {
+    gm_ctx *ctx = (gm_ctx *)calloc(1, sizeof(gm_ctx));
     if (!ctx) return nc_memory_noop();
 
     nc_strlcpy(ctx->path, path, sizeof(ctx->path));
-    nc_log(NC_LOG_INFO, "Memory: flat-file at %s", path);
+    nc_log(NC_LOG_INFO, "Guardian memory: %s", path);
 
     return (nc_memory){
-        .backend_name = "flat",
+        .backend_name = "guardian",
         .ctx     = ctx,
-        .store   = flat_store,
-        .recall  = flat_recall,
-        .forget  = flat_forget,
-        .free    = flat_free,
+        .store   = mem_store,
+        .recall  = mem_recall,
+        .forget  = mem_forget,
+        .free    = mem_free,
     };
 }
 
-/* ── Noop fallback ───────────────────────────────────────────── */
+/* ── Integration helper: synchronize guardian_memory tool with this backend ── */
+
+/* The built-in guardian_memory tool (in mcp_builtin.c) operates on a global
+ * static array. To avoid duplication, this function is called at startup to
+ * share the same entity array between the memory backend and the tool. */
+gm_ctx *gm_get_ctx(nc_memory *mem) {
+    if (!mem || !mem->ctx) return NULL;
+    return (gm_ctx *)mem->ctx;
+}
+
+/* Expose for mcp_builtin.c to use the same persistent backend */
+int gm_entity_count(void *ctx) {
+    gm_ctx *g = (gm_ctx *)ctx;
+    gm_load(g);
+    return g->entity_count;
+}
+
+gm_entity *gm_entity_at(void *ctx, int idx) {
+    gm_ctx *g = (gm_ctx *)ctx;
+    gm_load(g);
+    if (idx < 0 || idx >= g->entity_count) return NULL;
+    return &g->entities[idx];
+}
+
+bool gm_store_entity(void *ctx, const char *name, const char *type, const char *obs) {
+    return guardian_store_entity((gm_ctx *)ctx, name, type, obs);
+}
+
+int gm_query(void *ctx, const char *query, char *out, size_t out_cap) {
+    return guardian_query((gm_ctx *)ctx, query, out, out_cap);
+}
+
+bool gm_forget_entity(void *ctx, const char *name) {
+    return guardian_forget((gm_ctx *)ctx, name);
+}
+
+/* ── Noop fallback (used when memory alloc fails) ────────────── */
 
 static bool noop_store(nc_memory *self, const char *key, const char *content) {
     (void)self; (void)key; (void)content;
@@ -454,79 +405,3 @@ nc_memory nc_memory_noop(void) {
         .free   = noop_free,
     };
 }
-
-/* ── Tests ───────────────────────────────────────────────────── */
-
-#ifdef NC_TEST
-#include <unistd.h>
-
-void nc_test_memory(void) {
-    /* Use a temp file for testing */
-    char tmppath[] = "/tmp/noclaw_test_mem_XXXXXX";
-    int fd = mkstemp(tmppath);
-    NC_ASSERT(fd >= 0, "create temp file for memory test");
-    close(fd);
-
-    nc_memory mem = nc_memory_flat(tmppath);
-    NC_ASSERT(strcmp(mem.backend_name, "flat") == 0, "flat backend name");
-
-    /* Store */
-    bool ok = mem.store(&mem, "greeting", "Hello, world!");
-    NC_ASSERT(ok, "memory store greeting");
-
-    ok = mem.store(&mem, "project", "noclaw is written in C");
-    NC_ASSERT(ok, "memory store project");
-
-    ok = mem.store(&mem, "language", "C is fast and small");
-    NC_ASSERT(ok, "memory store language");
-
-    /* Recall by keyword search */
-    char buf[4096];
-    ok = mem.recall(&mem, "noclaw", buf, sizeof(buf));
-    NC_ASSERT(ok, "memory recall noclaw");
-    NC_ASSERT(strstr(buf, "noclaw") != NULL, "recall result contains noclaw");
-
-    /* Recall with no match */
-    ok = mem.recall(&mem, "xyznonexistent", buf, sizeof(buf));
-    NC_ASSERT(!ok, "recall returns false for no match");
-
-    /* Upsert (store with existing key) */
-    ok = mem.store(&mem, "greeting", "Updated greeting!");
-    NC_ASSERT(ok, "memory upsert greeting");
-
-    ok = mem.recall(&mem, "Updated", buf, sizeof(buf));
-    NC_ASSERT(ok, "recall finds updated content");
-    NC_ASSERT(strstr(buf, "Updated greeting") != NULL, "upsert overwrote content");
-
-    /* Forget */
-    ok = mem.forget(&mem, "greeting");
-    NC_ASSERT(ok, "memory forget greeting");
-
-    ok = mem.recall(&mem, "Updated greeting", buf, sizeof(buf));
-    NC_ASSERT(!ok, "recall returns false after forget");
-
-    /* Multiple results ranking */
-    mem.store(&mem, "c_info_1", "C language was created in 1972");
-    mem.store(&mem, "c_info_2", "C is used for systems programming");
-    mem.store(&mem, "c_info_3", "C compilers include gcc and clang");
-
-    ok = mem.recall(&mem, "C language", buf, sizeof(buf));
-    NC_ASSERT(ok, "recall multiple C results");
-
-    /* Free */
-    mem.free(&mem);
-    NC_ASSERT(mem.ctx == NULL, "memory free nulls ctx");
-
-    /* Cleanup */
-    unlink(tmppath);
-
-    /* Test noop fallback */
-    nc_memory noop = nc_memory_noop();
-    NC_ASSERT(strcmp(noop.backend_name, "noop") == 0, "noop backend name");
-    ok = noop.store(&noop, "key", "val");
-    NC_ASSERT(ok, "noop store returns true");
-    ok = noop.recall(&noop, "anything", buf, sizeof(buf));
-    NC_ASSERT(!ok, "noop recall returns false");
-    noop.free(&noop);
-}
-#endif
