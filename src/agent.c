@@ -29,9 +29,9 @@ static void load_sys_prompt(nc_agent *agent, char *buf, size_t cap) {
              "2. Never explain tool choice. Just call.\n"
              "3. Final answer only — no plans, no thinking aloud.\n"
              "4. Brevity mandatory. Zero fluff. Keyword-driven.\n"
-             "5. Use sequentialthinking for complex multi-step reasoning.\n"
-             "6. Use tavily_search for real-time news/research.\n"
-             "7. Use guardian_memory to persist important context between conversations.",
+             "5. sequentialthinking for complex multi-step reasoning.\n"
+             "6. tavily_search for web, wikipedia_search for facts.\n"
+             "7. guardian_memory persists context between conversations.",
              ident ? ident : "Minimalist command unit.",
              soul ? soul : "Helpful assistant.",
              user ? user : "Unknown user.");

@@ -140,9 +140,40 @@ LAUNCHER
 chmod +x run_t1a.sh
 echo -e "  ${GREEN}✓${NC} run_t1a.sh created"
 
+# ── Identity files ─────────────────────────────────────────────
+
+if [ ! -f ~/.noclaw/SOUL.md ]; then
+    cat > ~/.noclaw/SOUL.md << 'EOF'
+I am T1a, an efficient command unit serving my owner. I speak concisely, use tools silently, and guard my owner's privacy.
+EOF
+    echo -e "  ${GREEN}✓${NC} ~/.noclaw/SOUL.md created"
+fi
+
+if [ ! -f ~/.noclaw/USER.md ]; then
+    cat > ~/.noclaw/USER.md << 'EOF'
+Unknown user. Awaiting introduction.
+EOF
+    echo -e "  ${GREEN}✓${NC} ~/.noclaw/USER.md created"
+fi
+
+if [ ! -f ~/.noclaw/IDENTITY.md ]; then
+    cat > ~/.noclaw/IDENTITY.md << 'EOF'
+T1a command unit. Target: embedded devices (Luckfox, ESP32). Pure C, BearSSL only. 2 keys: Telegram + Tavily.
+EOF
+    echo -e "  ${GREEN}✓${NC} ~/.noclaw/IDENTITY.md created"
+fi
+echo ""
+
 # Remove old scripts
 rm -f start_t1a.sh
 echo ""
+
+# ── Verify build ────────────────────────────────────────────────
+
+if [ ! -f ./noclaw ]; then
+    echo -e "${YELLOW}Binary not found! Build failed.${NC}"
+    exit 1
+fi
 
 # ── Summary ──────────────────────────────────────────────────────
 
