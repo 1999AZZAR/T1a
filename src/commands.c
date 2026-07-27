@@ -20,6 +20,11 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     tools[n++] = nc_tool_base64();
     tools[n++] = nc_tool_hash(cfg);
     tools[n++] = nc_tool_acp_delegate();
+    /* Built-in MCP tools (replace external Node.js MCP servers) */
+    tools[n++] = nc_tool_reasoning();
+    tools[n++] = nc_tool_tavily_search();
+    tools[n++] = nc_tool_guardian_memory();
+    /* External MCP servers (still available if configured) */
     n = nc_mcp_register_all(cfg, tools, n);
     return n;
 }

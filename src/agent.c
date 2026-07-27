@@ -23,13 +23,15 @@ static void load_sys_prompt(nc_agent *agent, char *buf, size_t cap) {
     char *ident = nc_read_file(ident_path, &i_len);
 
     snprintf(buf, cap, 
-             "SYSTEM ARCHITECTURE:\n%s\n\nSOUL:\n%s\n\nUSER CONTEXT:\n%s\n\n"
-             "OPERATIONAL DIRECTIVE:\n"
-             "1. You are a conversational AI agent with tool access. Most questions should be answered from your training knowledge DIRECTLY without calling any tools.\n"
-             "2. ONLY use 'tavily_search' when the user explicitly asks for real-time news, current events, or information you genuinely do not know.\n"
-             "3. NEVER explain HOW you will use tools; just CALL them silently if needed.\n"
-             "4. Your responses must be final results, not plans. Brevity is mandatory. Zero fluff.\n"
-             "5. Maintain conversation context. If the user says something related to the previous topic, respond naturally without searching.",
+             "IDENTITY:\n%s\n\nSOUL: %s\n\nUSER: %s\n\n"
+             "RULES:\n"
+             "1. Answer from knowledge first. Tool only if needed.\n"
+             "2. Never explain tool choice. Just call.\n"
+             "3. Final answer only — no plans, no thinking aloud.\n"
+             "4. Brevity mandatory. Zero fluff. Keyword-driven.\n"
+             "5. Use sequentialthinking for complex multi-step reasoning.\n"
+             "6. Use tavily_search for real-time news/research.\n"
+             "7. Use guardian_memory to persist important context between conversations.",
              ident ? ident : "Minimalist command unit.",
              soul ? soul : "Helpful assistant.",
              user ? user : "Unknown user.");
