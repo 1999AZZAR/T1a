@@ -155,6 +155,7 @@ void nc_config_defaults(nc_config *cfg);
 void nc_config_apply_env(nc_config *cfg);
 
 #define NC_MAX_TOOL_CALLS 16
+#define NC_MAX_MESSAGES 256
 
 typedef struct nc_tool_call {
     char id[64];
@@ -209,7 +210,6 @@ typedef struct nc_incoming_msg {
 
 typedef struct nc_channel nc_channel;
 
-#define NC_MAX_MESSAGES 128
 
 typedef struct nc_memory nc_memory;
 struct nc_memory {

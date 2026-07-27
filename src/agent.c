@@ -147,8 +147,8 @@ static void agent_push_msg(nc_agent *agent, const char *role, const char *conten
                            const char *tool_call_id,
                            const nc_tool_call *tool_calls, int tool_call_count) {
     if (agent->message_count >= NC_MAX_MESSAGES) {
-        int keep = NC_MAX_MESSAGES / 2;
-        /* Shift messages to keep the last half + system prompt at [0] */
+        int keep = NC_MAX_MESSAGES * 3 / 4;
+        /* Shift messages to keep last 75% + system prompt at [0] */
         memmove(&agent->messages[1], &agent->messages[agent->message_count - keep],
                 (size_t)keep * sizeof(nc_message));
         agent->message_count = 1 + keep;
