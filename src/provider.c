@@ -1,11 +1,13 @@
 /*
- * Provider implementations: OpenAI-compatible and Anthropic.
- * Uses nc_http_post (native TLS) for HTTPS.
+ * Provider: OpenAI-compatible (used by OpenCode API).
+ * OpenCode endpoint: https://opencode.ai/zen/v1
+ * Models: deepseek-v4-flash-free (default), mimo-v2.5-free,
+ *         nemotron-3-ultra-free, north-mini-code-free
  *
- * Both providers handle full tool-call round-trips:
+ * Handles full tool-call round-trips:
  *   - Serialize assistant messages with tool_calls
  *   - Serialize tool-result messages
- *   - Parse tool_calls / tool_use from responses
+ *   - Parse tool_calls from responses
  */
 
 #include "nc.h"
@@ -37,7 +39,6 @@ static int json_escape_into(char *buf, size_t bufsz, int off, const char *s) {
                 if ((unsigned char)*s >= 0x20)
                     buf[off++] = *s;
                 else {
-                    /* Escape other control characters as \u00xx */
                     off += snprintf(buf + off, bufsz - (size_t)off, "\\u%04x", (unsigned char)*s);
                 }
                 break;
@@ -50,12 +51,11 @@ static int json_escape_into(char *buf, size_t bufsz, int off, const char *s) {
 static size_t estimate_messages_size(const nc_message *msgs, int count) {
     size_t sz = 512;
     for (int i = 0; i < count; i++) {
-        sz += 256; /* per-message overhead */
+        sz += 256;
         if (msgs[i].content)
             sz += strlen(msgs[i].content) * 2;
-        /* tool_calls in assistant messages */
         for (int j = 0; j < msgs[i].tool_call_count; j++) {
-            sz += 256; /* per-call overhead */
+            sz += 256;
             sz += strlen(msgs[i].tool_calls[j].arguments) * 2;
         }
     }
@@ -63,7 +63,7 @@ static size_t estimate_messages_size(const nc_message *msgs, int count) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- *  OpenAI-compatible provider (OpenRouter, OpenAI, etc.)
+ *  OpenAI-compatible provider (OpenCode, OpenRouter, etc.)
  *
  *  Wire format for tool calls:
  *    Assistant: { "role":"assistant", "content":null,
@@ -72,7 +72,7 @@ static size_t estimate_messages_size(const nc_message *msgs, int count) {
  *    Result:   { "role":"tool", "tool_call_id":"call_x", "content":"..." }
  * ══════════════════════════════════════════════════════════════════ */
 
-/* Build the messages array for OpenAI format */
+/* Build the messages array */
 static int openai_build_messages(char *buf, size_t bufsz,
                                  const nc_message *msgs, int count) {
     int off = 0;
@@ -86,8 +86,6 @@ static int openai_build_messages(char *buf, size_t bufsz,
             /* Assistant message with tool_calls */
             off += snprintf(buf + off, bufsz - (size_t)off,
                 "{\"role\":\"assistant\",\"content\":");
-
-            /* content can be null or a string */
             if (msgs[i].content && msgs[i].content[0]) {
                 buf[off++] = '"';
                 off = json_escape_into(buf, bufsz, off, msgs[i].content);
@@ -95,7 +93,6 @@ static int openai_build_messages(char *buf, size_t bufsz,
             } else {
                 off += snprintf(buf + off, bufsz - (size_t)off, "null");
             }
-
             off += snprintf(buf + off, bufsz - (size_t)off, ",\"tool_calls\":[");
             for (int j = 0; j < msgs[i].tool_call_count; j++) {
                 if (j > 0) buf[off++] = ',';
@@ -104,7 +101,6 @@ static int openai_build_messages(char *buf, size_t bufsz,
                     "{\"id\":\"%s\",\"type\":\"function\","
                     "\"function\":{\"name\":\"%s\",\"arguments\":\"",
                     tc->id, tc->name);
-                /* arguments is a JSON string that must be escaped */
                 off = json_escape_into(buf, bufsz, off, tc->arguments);
                 off += snprintf(buf + off, bufsz - (size_t)off, "\"}}");
             }
@@ -156,7 +152,6 @@ static void openai_parse_tool_calls(nc_json *tc_arr, nc_chat_response *resp) {
             out->name[cl] = '\0';
         }
 
-        /* arguments is a JSON string (already escaped in the response) */
         nc_str args = nc_json_str(nc_json_get(fn, "arguments"), "{}");
         if (args.len > 0) {
             size_t cl = args.len < sizeof(out->arguments) - 1 ? args.len : sizeof(out->arguments) - 1;
@@ -180,10 +175,10 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
     if (!msgs_json) return false;
     openai_build_messages(msgs_json, msgs_buf_sz, req->messages, req->message_count);
 
-    /* Build request body — use actual msgs_json length, not estimate */
+    /* Build request body */
     size_t msgs_actual_len = strlen(msgs_json);
     size_t tools_len = req->tools_json ? strlen(req->tools_json) : 0;
-    size_t body_sz = msgs_actual_len + tools_len + 4096;  /* generous overhead */
+    size_t body_sz = msgs_actual_len + tools_len + 4096;
     char *body = (char *)malloc(body_sz);
     if (!body) { free(msgs_json); return false; }
 
@@ -201,7 +196,6 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
             req->max_tokens > 0 ? req->max_tokens : 4096);
     }
 
-    /* Safety: if snprintf was truncated, Content-Length would mismatch */
     if ((size_t)body_len >= body_sz) {
         nc_log(NC_LOG_WARN, "Request body truncated (%d > %zu), reallocating", body_len, body_sz);
         body_sz = (size_t)body_len + 1;
@@ -230,15 +224,12 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
         auth_hdr,
     };
 
-    /* URL */
+    /* URL: append /chat/completions */
     char url[512];
-    if (ctx->api_url[0])
-        snprintf(url, sizeof(url), "%s/chat/completions", ctx->api_url);
-    else
-        snprintf(url, sizeof(url), "https://openrouter.ai/api/v1/chat/completions");
+    snprintf(url, sizeof(url), "%s/chat/completions", ctx->api_url);
 
-    /* Retry logic for HTTP request */
-    int retries = 3;
+    /* Retry logic */
+    int retries = 2;
     bool result = false;
     nc_http_response http_resp;
     memset(&http_resp, 0, sizeof(http_resp));
@@ -248,15 +239,15 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
             if (http_resp.status == 200) {
                 break;
             } else if (http_resp.status == 429 || http_resp.status >= 500) {
-                nc_log(NC_LOG_WARN, "Provider HTTP %d, retrying...", http_resp.status);
+                nc_log(NC_LOG_WARN, "HTTP %d, retrying...", http_resp.status);
                 nc_http_response_free(&http_resp);
-                usleep(1000000); /* 1s backoff */
+                usleep(1000000);
                 continue;
             } else if (http_resp.status == 400 && strstr(http_resp.body, "tool")) {
-                nc_log(NC_LOG_WARN, "Provider HTTP 400 (likely tool schema error), skipping retries...");
+                nc_log(NC_LOG_WARN, "HTTP 400 (tool schema error), skipping retries");
                 goto cleanup;
             } else {
-                nc_log(NC_LOG_ERROR, "Provider fatal HTTP %d: %.200s", http_resp.status, http_resp.body);
+                nc_log(NC_LOG_ERROR, "Fatal HTTP %d: %.200s", http_resp.status, http_resp.body);
                 goto cleanup;
             }
         }
@@ -282,13 +273,11 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
             goto cleanup;
         }
 
-        /* Extract choices[0].message */
         nc_json *choices = nc_json_get(root, "choices");
         if (choices && choices->type == NC_JSON_ARRAY && choices->array.count > 0) {
             nc_json *choice0 = &choices->array.items[0];
             nc_json *message = nc_json_get(choice0, "message");
             if (message) {
-                /* Content (may be null when tool_calls present) */
                 nc_json *content_node = nc_json_get(message, "content");
                 if (content_node && content_node->type == NC_JSON_STRING) {
                     nc_str content = content_node->string;
@@ -298,13 +287,11 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
                     resp->content[cplen] = '\0';
                 }
 
-                /* Tool calls */
                 nc_json *tc = nc_json_get(message, "tool_calls");
                 openai_parse_tool_calls(tc, resp);
             }
         }
 
-        /* Usage */
         nc_json *usage = nc_json_get(root, "usage");
         if (usage) {
             resp->prompt_tokens = (int)nc_json_num(nc_json_get(usage, "prompt_tokens"), 0);
@@ -327,9 +314,12 @@ static void provider_free(nc_provider *self) {
     self->ctx = NULL;
 }
 
+/* ── OpenAI-compatible provider (generic) ────────────────────── */
+
 nc_provider nc_provider_openai(const char *api_key, const char *api_url) {
     provider_ctx *ctx = (provider_ctx *)calloc(1, sizeof(provider_ctx));
-    if (!ctx) return (nc_provider){ .name = "openai", .ctx = NULL, .chat = NULL, .free = NULL };
+    if (!ctx)
+        return (nc_provider){ .name = "openai", .ctx = NULL, .chat = NULL, .free = NULL };
     if (api_key) nc_strlcpy(ctx->api_key, api_key, sizeof(ctx->api_key));
     if (api_url) nc_strlcpy(ctx->api_url, api_url, sizeof(ctx->api_url));
 
@@ -342,477 +332,43 @@ nc_provider nc_provider_openai(const char *api_key, const char *api_url) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- *  Anthropic provider
+ *  OpenCode Provider
  *
- *  Wire format for tool calls:
- *    Assistant: { "role":"assistant",
- *      "content":[{"type":"text","text":"..."},
- *                 {"type":"tool_use","id":"toolu_x","name":"foo","input":{...}}] }
- *    Result:   { "role":"user",
- *      "content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"..."}] }
+ *  Uses OpenCode's free API: https://opencode.ai/zen/v1
+ *  Default model: deepseek-v4-flash-free (1M context, $0)
  *
- *  Tools use "input_schema" instead of "parameters".
+ *  Free models available:
+ *    deepseek-v4-flash-free (1M ctx)
+ *    mimo-v2.5-free         (262K ctx)
+ *    nemotron-3-ultra-free  (128K ctx)
+ *    north-mini-code-free   (128K ctx)
  * ══════════════════════════════════════════════════════════════════ */
 
-/* Build Anthropic-format tools directly from the tool defs (not from OpenAI JSON) */
-static const char *anthropic_tools_json_from_defs(char *buf, size_t bufsz,
-                                                  const nc_chat_request *req) {
-    /* We can't easily convert OpenAI tools JSON to Anthropic format by re-parsing,
-     * because the parameters are JSON objects embedded as raw text.
-     * Instead, the agent should provide Anthropic-native tools.
-     * But we don't have access to the nc_tool array here.
-     *
-     * Pragmatic solution: the tools_json from build_tools_json() in agent.c is
-     * OpenAI-format. We convert by replacing the structure:
-     *   OpenAI: [{"type":"function","function":{"name":"x","description":"y","parameters":{...}}}]
-     *   Anthropic: [{"name":"x","description":"y","input_schema":{...}}]
-     *
-     * We'll re-parse and rebuild. */
-    if (!req->tools_json) return NULL;
+#define OPENCODE_BASE_URL "https://opencode.ai/zen/v1"
+#define OPENCODE_DEFAULT_MODEL "deepseek-v4-flash-free"
 
-    nc_arena scratch;
-    nc_arena_init(&scratch, strlen(req->tools_json) * 2 + 1024);
-    nc_json *arr = nc_json_parse(&scratch, req->tools_json, strlen(req->tools_json));
-
-    if (!arr || arr->type != NC_JSON_ARRAY) {
-        nc_arena_free(&scratch);
-        return NULL;
-    }
-
-    int off = 0;
-    off += snprintf(buf + off, bufsz - (size_t)off, "[");
-    for (int i = 0; i < arr->array.count; i++) {
-        if (i > 0) buf[off++] = ',';
-        nc_json *tool = &arr->array.items[i];
-        nc_json *fn = nc_json_get(tool, "function");
-        if (!fn) continue;
-        nc_str name = nc_json_str(nc_json_get(fn, "name"), "");
-        nc_str desc = nc_json_str(nc_json_get(fn, "description"), "");
-
-        off += snprintf(buf + off, bufsz - (size_t)off,
-            "{\"name\":\"%.*s\",\"description\":\"%.*s\",\"input_schema\":",
-            NC_STR_ARG(name), NC_STR_ARG(desc));
-
-        /* The parameters value is a JSON object in the parsed tree.
-         * We need to re-serialize it. Since our JSON library doesn't have a writer
-         * for nc_json nodes, find the raw text in the original tools_json string.
-         *
-         * Alternative: find "parameters" in the raw string for this tool. */
-        nc_json *params = nc_json_get(fn, "parameters");
-        if (params && params->type == NC_JSON_OBJECT) {
-            /* Re-build a minimal JSON object from the parsed structure */
-            off += snprintf(buf + off, bufsz - (size_t)off, "{\"type\":\"object\",\"properties\":{");
-            nc_json *props = nc_json_get(params, "properties");
-            if (props && props->type == NC_JSON_OBJECT) {
-                for (int k = 0; k < props->object.count; k++) {
-                    if (k > 0) buf[off++] = ',';
-                    nc_str pname = props->object.keys[k];
-                    nc_json *pval = &props->object.vals[k];
-                    nc_str ptype = nc_json_str(nc_json_get(pval, "type"), "string");
-                    nc_str pdesc = nc_json_str(nc_json_get(pval, "description"), "");
-                    off += snprintf(buf + off, bufsz - (size_t)off,
-                        "\"%.*s\":{\"type\":\"%.*s\",\"description\":\"%.*s\"}",
-                        NC_STR_ARG(pname), NC_STR_ARG(ptype), NC_STR_ARG(pdesc));
-                }
-            }
-            off += snprintf(buf + off, bufsz - (size_t)off, "}");
-            /* required */
-            nc_json *req_arr = nc_json_get(params, "required");
-            if (req_arr && req_arr->type == NC_JSON_ARRAY && req_arr->array.count > 0) {
-                off += snprintf(buf + off, bufsz - (size_t)off, ",\"required\":[");
-                for (int k = 0; k < req_arr->array.count; k++) {
-                    if (k > 0) buf[off++] = ',';
-                    nc_str rname = req_arr->array.items[k].string;
-                    off += snprintf(buf + off, bufsz - (size_t)off, "\"%.*s\"", NC_STR_ARG(rname));
-                }
-                off += snprintf(buf + off, bufsz - (size_t)off, "]");
-            }
-            off += snprintf(buf + off, bufsz - (size_t)off, "}");
-        } else {
-            off += snprintf(buf + off, bufsz - (size_t)off, "{\"type\":\"object\"}");
-        }
-
-        off += snprintf(buf + off, bufsz - (size_t)off, "}");
-    }
-    off += snprintf(buf + off, bufsz - (size_t)off, "]");
-
-    nc_arena_free(&scratch);
-    return buf;
-}
-
-/* Build the Anthropic messages array */
-static int anthropic_build_messages(char *buf, size_t bufsz,
-                                    const nc_message *msgs, int count) {
-    int off = 0;
-    off += snprintf(buf + off, bufsz - (size_t)off, "[");
-
-    bool first = true;
-    for (int i = 0; i < count; i++) {
-        if ((size_t)off >= bufsz - 10) break;
-        if (strcmp(msgs[i].role, "system") == 0) continue; /* handled separately */
-
-        if (!first) buf[off++] = ',';
-        first = false;
-
-        if (msgs[i].tool_call_count > 0) {
-            /* Assistant message with tool_use content blocks */
-            off += snprintf(buf + off, bufsz - (size_t)off,
-                "{\"role\":\"assistant\",\"content\":[");
-
-            bool first_block = true;
-            /* Text block if content is non-empty */
-            if (msgs[i].content && msgs[i].content[0]) {
-                off += snprintf(buf + off, bufsz - (size_t)off, "{\"type\":\"text\",\"text\":\"");
-                off = json_escape_into(buf, bufsz, off, msgs[i].content);
-                off += snprintf(buf + off, bufsz - (size_t)off, "\"}");
-                first_block = false;
-            }
-
-            /* tool_use blocks */
-            for (int j = 0; j < msgs[i].tool_call_count; j++) {
-                if (!first_block) buf[off++] = ',';
-                first_block = false;
-                const nc_tool_call *tc = &msgs[i].tool_calls[j];
-                off += snprintf(buf + off, bufsz - (size_t)off,
-                    "{\"type\":\"tool_use\",\"id\":\"%s\",\"name\":\"%s\",\"input\":%s}",
-                    tc->id, tc->name, tc->arguments);
-            }
-            off += snprintf(buf + off, bufsz - (size_t)off, "]}");
-
-        } else if (msgs[i].tool_call_id && msgs[i].tool_call_id[0]) {
-            /* Tool result — Anthropic uses role=user with tool_result content blocks.
-             * Multiple consecutive tool results should be merged into one user message.
-             * Scan ahead to find all consecutive tool results. */
-            off += snprintf(buf + off, bufsz - (size_t)off,
-                "{\"role\":\"user\",\"content\":[");
-
-            int j = i;
-            bool first_result = true;
-            while (j < count && msgs[j].tool_call_id && msgs[j].tool_call_id[0]) {
-                if (!first_result) buf[off++] = ',';
-                first_result = false;
-                off += snprintf(buf + off, bufsz - (size_t)off,
-                    "{\"type\":\"tool_result\",\"tool_use_id\":\"%s\",\"content\":\"",
-                    msgs[j].tool_call_id);
-                off = json_escape_into(buf, bufsz, off, msgs[j].content);
-                off += snprintf(buf + off, bufsz - (size_t)off, "\"}");
-                j++;
-            }
-            /* Skip the messages we just consumed (outer loop will i++ past them) */
-            i = j - 1;
-
-            off += snprintf(buf + off, bufsz - (size_t)off, "]}");
-
-        } else {
-            /* Normal user/assistant message */
-            off += snprintf(buf + off, bufsz - (size_t)off,
-                "{\"role\":\"%s\",\"content\":\"", msgs[i].role);
-            off = json_escape_into(buf, bufsz, off, msgs[i].content);
-            off += snprintf(buf + off, bufsz - (size_t)off, "\"}");
-        }
-    }
-
-    off += snprintf(buf + off, bufsz - (size_t)off, "]");
-    return off;
-}
-
-/* Parse tool_use blocks from Anthropic response content array */
-static void anthropic_parse_tool_calls(nc_json *content_arr, nc_chat_response *resp) {
-    if (!content_arr || content_arr->type != NC_JSON_ARRAY) return;
-
-    for (int i = 0; i < content_arr->array.count; i++) {
-        nc_json *block = &content_arr->array.items[i];
-        nc_str btype = nc_json_str(nc_json_get(block, "type"), "");
-
-        if (nc_str_eql(btype, "text")) {
-            /* Accumulate text content */
-            nc_str text = nc_json_str(nc_json_get(block, "text"), "");
-            if (text.len > 0) {
-                size_t cur = strlen(resp->content);
-                size_t avail = sizeof(resp->content) - cur - 1;
-                size_t cplen = text.len < avail ? text.len : avail;
-                if (text.ptr && cplen > 0) {
-                    memcpy(resp->content + cur, text.ptr, cplen);
-                    resp->content[cur + cplen] = '\0';
-                }
-            }
-        }
-        else if (nc_str_eql(btype, "tool_use") && resp->tool_call_count < NC_MAX_TOOL_CALLS) {
-            nc_tool_call *out = &resp->tool_calls[resp->tool_call_count];
-
-            nc_str id = nc_json_str(nc_json_get(block, "id"), "");
-            if (id.len > 0) {
-                size_t cl = id.len < sizeof(out->id) - 1 ? id.len : sizeof(out->id) - 1;
-                memcpy(out->id, id.ptr, cl);
-                out->id[cl] = '\0';
-            }
-
-            nc_str name = nc_json_str(nc_json_get(block, "name"), "");
-            if (name.len > 0) {
-                size_t cl = name.len < sizeof(out->name) - 1 ? name.len : sizeof(out->name) - 1;
-                memcpy(out->name, name.ptr, cl);
-                out->name[cl] = '\0';
-            }
-
-            /* input is a JSON object — we need to serialize it back to a string.
-             * Since our JSON lib doesn't have a generic serializer, we find the raw
-             * substring in the response body. We store it as-is from the input field.
-             * For now, re-build a minimal JSON from the parsed object. */
-            nc_json *input = nc_json_get(block, "input");
-            if (input && input->type == NC_JSON_OBJECT) {
-                /* Build JSON string from the object */
-                int aoff = 0;
-                aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff, "{");
-                for (int k = 0; k < input->object.count; k++) {
-                    if (k > 0) out->arguments[aoff++] = ',';
-                    nc_str key = input->object.keys[k];
-                    nc_json *val = &input->object.vals[k];
-                    aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff,
-                        "\"%.*s\":", NC_STR_ARG(key));
-                    if (val->type == NC_JSON_STRING) {
-                        aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff,
-                            "\"%.*s\"", NC_STR_ARG(val->string));
-                    } else if (val->type == NC_JSON_NUMBER) {
-                        if (val->number == (int)val->number)
-                            aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff,
-                                "%d", (int)val->number);
-                        else
-                            aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff,
-                                "%.6f", val->number);
-                    } else if (val->type == NC_JSON_BOOL) {
-                        aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff,
-                            "%s", val->boolean ? "true" : "false");
-                    } else if (val->type == NC_JSON_NULL) {
-                        aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff, "null");
-                    } else {
-                        /* Nested objects/arrays: emit as empty for now */
-                        aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff, "null");
-                    }
-                }
-                aoff += snprintf(out->arguments + aoff, sizeof(out->arguments) - (size_t)aoff, "}");
-            } else {
-                nc_strlcpy(out->arguments, "{}", sizeof(out->arguments));
-            }
-
-            resp->tool_call_count++;
-        }
-    }
-
-    resp->has_tool_calls = resp->tool_call_count > 0;
-}
-
-static bool anthropic_chat(nc_provider *self, const nc_chat_request *req, nc_chat_response *resp) {
-    provider_ctx *ctx = (provider_ctx *)self->ctx;
-    memset(resp, 0, sizeof(*resp));
-
-    /* Build messages JSON (Anthropic format) */
-    size_t msgs_buf_sz = estimate_messages_size(req->messages, req->message_count);
-    char *msgs_json = (char *)malloc(msgs_buf_sz);
-    if (!msgs_json) return false;
-    anthropic_build_messages(msgs_json, msgs_buf_sz, req->messages, req->message_count);
-
-    /* Build tools JSON (Anthropic format: input_schema) */
-    char *tools_buf = NULL;
-    if (req->tools_json) {
-        size_t tools_sz = strlen(req->tools_json) * 3 + 4096;
-        tools_buf = (char *)malloc(tools_sz);
-        if (tools_buf)
-            anthropic_tools_json_from_defs(tools_buf, tools_sz, req);
-    }
-
-    /* Build request body */
-    size_t body_sz = msgs_buf_sz + 2048 + (tools_buf ? strlen(tools_buf) : 0);
-    char *body = (char *)malloc(body_sz);
-    if (!body) { free(msgs_json); free(tools_buf); return false; }
-
-    int off = 0;
-    off += snprintf(body + off, body_sz - (size_t)off,
-        "{\"model\":\"%s\",\"max_tokens\":%d,\"temperature\":%.2f,",
-        req->model, req->max_tokens > 0 ? req->max_tokens : 4096, req->temperature);
-
-    /* System message (Anthropic puts it at top level, not in messages) */
-    for (int i = 0; i < req->message_count; i++) {
-        if (strcmp(req->messages[i].role, "system") == 0 && req->messages[i].content) {
-            off += snprintf(body + off, body_sz - (size_t)off, "\"system\":\"");
-            off = json_escape_into(body, body_sz, off, req->messages[i].content);
-            off += snprintf(body + off, body_sz - (size_t)off, "\",");
-            break;
-        }
-    }
-
-    /* Tools */
-    if (tools_buf)
-        off += snprintf(body + off, body_sz - (size_t)off, "\"tools\":%s,", tools_buf);
-
-    /* Messages */
-    off += snprintf(body + off, body_sz - (size_t)off, "\"messages\":%s}", msgs_json);
-
-    /* Headers */
-    char auth_hdr[300];
-    snprintf(auth_hdr, sizeof(auth_hdr), "x-api-key: %s", ctx->api_key);
-    const char *headers[] = {
-        "Content-Type: application/json",
-        auth_hdr,
-        "anthropic-version: 2023-06-01",
-    };
-
-    char url[512];
-    if (ctx->api_url[0])
-        snprintf(url, sizeof(url), "%s/messages", ctx->api_url);
-    else
-        snprintf(url, sizeof(url), "https://api.anthropic.com/v1/messages");
-
-    /* Retry logic for HTTP request */
-    int retries = 3;
-    bool result = false;
-    nc_http_response http_resp;
-    memset(&http_resp, 0, sizeof(http_resp));
-
-    while (retries-- > 0) {
-        if (nc_http_post(url, body, (size_t)off, headers, 3, &http_resp)) {
-            if (http_resp.status == 200) {
-                break;
-            } else if (http_resp.status == 429 || http_resp.status >= 500) {
-                nc_log(NC_LOG_WARN, "Provider HTTP %d, retrying...", http_resp.status);
-                nc_http_response_free(&http_resp);
-                usleep(1000000);
-                continue;
-            } else if (http_resp.status == 400 && strstr(http_resp.body, "tool")) {
-                nc_log(NC_LOG_WARN, "Provider HTTP 400 (likely tool schema error), skipping retries...");
-                goto cleanup;
-            } else {
-                nc_log(NC_LOG_ERROR, "Provider fatal HTTP %d: %.200s", http_resp.status, http_resp.body);
-                goto cleanup;
-            }
-        }
-        nc_log(NC_LOG_WARN, "HTTP request failed, retrying...");
-        nc_http_response_free(&http_resp);
-        usleep(1000000);
-    }
-
-    if (http_resp.status != 200) {
-        nc_log(NC_LOG_ERROR, "Provider communication failed after retries.");
-        goto cleanup;
-    }
-
-    /* Parse response */
-    {
-        nc_arena a;
-        nc_arena_init(&a, http_resp.body_len * 2 + 1024);
-        nc_json *root = nc_json_parse(&a, http_resp.body, http_resp.body_len);
-
-        if (root) {
-            /* Parse all content blocks (text + tool_use) */
-            nc_json *content_arr = nc_json_get(root, "content");
-            anthropic_parse_tool_calls(content_arr, resp);
-
-            /* Usage */
-            nc_json *usage = nc_json_get(root, "usage");
-            if (usage) {
-                resp->prompt_tokens = (int)nc_json_num(nc_json_get(usage, "input_tokens"), 0);
-                resp->completion_tokens = (int)nc_json_num(nc_json_get(usage, "output_tokens"), 0);
-            }
-        }
-
-        nc_arena_free(&a);
-    }
-    result = true;
-
-cleanup:
-    nc_http_response_free(&http_resp);
-    free(msgs_json);
-    free(tools_buf);
-    free(body);
-    return result;
-}
-
-nc_provider nc_provider_anthropic(const char *api_key, const char *api_url) {
-    provider_ctx *ctx = (provider_ctx *)calloc(1, sizeof(provider_ctx));
-    if (!ctx) return (nc_provider){ .name = "anthropic", .ctx = NULL, .chat = NULL, .free = NULL };
-    if (api_key) nc_strlcpy(ctx->api_key, api_key, sizeof(ctx->api_key));
-    if (api_url) nc_strlcpy(ctx->api_url, api_url, sizeof(ctx->api_url));
-
-    return (nc_provider){
-        .name = "anthropic",
-        .ctx  = ctx,
-        .chat = anthropic_chat,
-        .free = provider_free,
-    };
+nc_provider nc_provider_opencode(const char *api_key) {
+    /* If api_key is empty or null, use a placeholder token.
+       OpenCode's free models don't strictly require auth, but
+       the HTTP layer needs a non-empty Bearer token to avoid
+       auth header issues. */
+    const char *key = (api_key && api_key[0]) ? api_key : "noclaw-free";
+    return nc_provider_openai(key, OPENCODE_BASE_URL);
 }
 
 /* ══════════════════════════════════════════════════════════════════
- *  Provider Factory & Chaining
+ *  Provider Factory
  * ══════════════════════════════════════════════════════════════════ */
 
-/* Helper to select implementation */
-static nc_provider create_provider_impl(const char *name, const char *key, const char *url) {
-    if (strcmp(name, "anthropic") == 0) {
-        return nc_provider_anthropic(key, url);
-    }
-    /* default to openai/openrouter */
-    return nc_provider_openai(key, url);
-}
+nc_provider nc_provider_from_config(const nc_config *cfg) {
+    const char *prov = cfg->default_provider;
+    const char *key  = cfg->api_key;
+    const char *url  = cfg->api_url;
 
-nc_provider nc_provider_from_config(const nc_config *cfg, bool use_fallback) {
-    if (use_fallback) {
-        return create_provider_impl(cfg->fallback_provider, cfg->fallback_api_key, cfg->fallback_api_url);
-    } else {
-        return create_provider_impl(cfg->default_provider, cfg->api_key, cfg->api_url);
-    }
-}
-
-/* Chain context */
-typedef struct {
-    nc_provider primary;
-    nc_provider fallback;
-    char        fallback_model[128];
-} chain_ctx;
-
-static bool chain_chat(nc_provider *self, const nc_chat_request *req, nc_chat_response *resp) {
-    chain_ctx *ctx = (chain_ctx *)self->ctx;
-
-    /* Try primary */
-    if (ctx->primary.chat(&ctx->primary, req, resp)) {
-        return true;
+    if (strcmp(prov, "opencode") == 0 || strcmp(prov, "opencode-free") == 0) {
+        return nc_provider_opencode(key);
     }
 
-    nc_log(NC_LOG_WARN, "Primary provider failed, switching to fallback (%s)", ctx->fallback.name);
-
-    /* Create alternate request with fallback model if specified */
-    nc_chat_request req_alt = *req;
-    if (ctx->fallback_model[0]) {
-        req_alt.model = ctx->fallback_model;
-    }
-
-    return ctx->fallback.chat(&ctx->fallback, &req_alt, resp);
-}
-
-static void chain_free(nc_provider *self) {
-    chain_ctx *ctx = (chain_ctx *)self->ctx;
-    if (ctx->primary.free) ctx->primary.free(&ctx->primary);
-    if (ctx->fallback.free) ctx->fallback.free(&ctx->fallback);
-    free(ctx);
-    self->ctx = NULL;
-}
-
-nc_provider nc_provider_chain(nc_provider primary, nc_provider fallback, const char *fallback_model) {
-    chain_ctx *ctx = (chain_ctx *)calloc(1, sizeof(chain_ctx));
-    if (!ctx) {
-        /* If OOM, just return primary and leak nothing (caller owns them if this fails? 
-         * actually caller expects us to take ownership. We should try to free them or warn.
-         * But given we return a struct by value, we can't easily signal error. 
-         * Just return primary.*/
-        return primary;
-    }
-
-    ctx->primary = primary;
-    ctx->fallback = fallback;
-    if (fallback_model) nc_strlcpy(ctx->fallback_model, fallback_model, sizeof(ctx->fallback_model));
-
-    return (nc_provider){
-        .name = "chain",
-        .ctx  = ctx,
-        .chat = chain_chat,
-        .free = chain_free,
-    };
+    /* Default: OpenAI-compatible (works with OpenRouter, OpenAI, etc.) */
+    return nc_provider_openai(key, url && url[0] ? url : "https://openrouter.ai/api/v1");
 }

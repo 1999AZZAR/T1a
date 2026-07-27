@@ -197,9 +197,8 @@ struct nc_provider {
 };
 
 nc_provider nc_provider_openai(const char *api_key, const char *api_url);
-nc_provider nc_provider_anthropic(const char *api_key, const char *api_url);
-nc_provider nc_provider_chain(nc_provider primary, nc_provider fallback, const char *fallback_model);
-nc_provider nc_provider_from_config(const nc_config *cfg, bool use_fallback);
+nc_provider nc_provider_opencode(const char *api_key);
+nc_provider nc_provider_from_config(const nc_config *cfg);
 
 typedef struct nc_incoming_msg {
     char sender[128];

@@ -19,8 +19,9 @@ void nc_config_defaults(nc_config *cfg) {
     nc_path_join(cfg->workspace_dir, sizeof(cfg->workspace_dir), cfg->config_dir, NC_WORKSPACE_DIR);
 
     /* Provider */
-    nc_strlcpy(cfg->default_provider, "openrouter", sizeof(cfg->default_provider));
-    nc_strlcpy(cfg->default_model, "anthropic/claude-3.5-sonnet", sizeof(cfg->default_model));
+    nc_strlcpy(cfg->default_provider, "opencode", sizeof(cfg->default_provider));
+    nc_strlcpy(cfg->default_model, "deepseek-v4-flash-free", sizeof(cfg->default_model));
+    nc_strlcpy(cfg->api_url, "https://opencode.ai/zen/v1", sizeof(cfg->api_url));
     cfg->default_temperature = 0.5;
 
     /* Gateway */

@@ -43,13 +43,7 @@ int nc_cmd_agent(int argc, char **argv) {
         }
     }
 
-    nc_provider prov = nc_provider_from_config(&cfg, false);
-    if (cfg.fallback_provider[0] && cfg.fallback_api_key[0]) {
-        nc_provider fallback = nc_provider_from_config(&cfg, true);
-        prov = nc_provider_chain(prov, fallback, cfg.fallback_model);
-        nc_log(NC_LOG_INFO, "  Fallback: %s (%s)", cfg.fallback_provider, 
-               cfg.fallback_model[0] ? cfg.fallback_model : "default model");
-    }
+    nc_provider prov = nc_provider_from_config(&cfg);
 
     char mem_path[1024];
     nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "memories.tsv");
