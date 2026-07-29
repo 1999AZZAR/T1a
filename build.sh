@@ -170,7 +170,7 @@ fi
 
 if [ ! -f ~/.noclaw/IDENTITY.md ]; then
     cat > ~/.noclaw/IDENTITY.md << 'EOF'
-T1a command unit. Target: embedded devices (Luckfox, ESP32). Pure C, BearSSL only. 2 keys: Telegram + Tavily.
+T1a command unit. Target: embedded Linux devices (Luckfox Pico Mini RV1103). Pure C, BearSSL only. 2 keys: Telegram + Tavily.
 EOF
     echo -e "  ${GREEN}✓${NC} ~/.noclaw/IDENTITY.md created"
 fi

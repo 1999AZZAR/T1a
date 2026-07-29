@@ -1,7 +1,7 @@
 # T1a — Pure-C AI Agent for Embedded Devices
 
 T1a is an ultra-lightweight AI agent built in C, designed to run one-per-device
-on resource-constrained hardware (Luckfox Pico Mini, ESP32-class SBCs).
+on resource-constrained hardware (exclusively targeting the Luckfox Pico Mini RV1103).
 ~153KB binary (~128KiB allocated), ~2MiB idle RAM, BearSSL only beyond libc.
 
 ![T1a Core Architecture](assets/blotcat-architecture.png)

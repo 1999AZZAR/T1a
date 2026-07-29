@@ -6,7 +6,7 @@
 
 ## Overview
 
-T1a is a pure-C AI agent for embedded devices (Luckfox Pico Mini, ESP32-class SBCs).
+T1a is a pure-C AI agent for embedded Linux devices (exclusively targeting the Luckfox Pico Mini RV1103).
 Runs one-per-device, connecting directly to OpenCode with Kilo Gateway as a
 cross-provider free fallback. No local proxy or external CLI runtime.
 
