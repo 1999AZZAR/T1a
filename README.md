@@ -1,7 +1,7 @@
 # T1a — Pure-C AI Agent for Embedded Devices
 
 T1a is an ultra-lightweight AI agent built in C, designed to run one-per-device
-on resource-constrained hardware (exclusively targeting the Luckfox Pico Mini RV1103).
+on resource-constrained hardware. It is exclusively optimized for the **Luckfox Pico Mini RV1103**, serving as the ultimate "brain" for autonomous robots and zero-token smart appliances.
 ~153KB binary (~128KiB allocated), ~2MiB idle RAM, BearSSL only beyond libc.
 
 ![T1a Core Architecture](assets/blotcat-architecture.png)
@@ -27,6 +27,8 @@ on resource-constrained hardware (exclusively targeting the Luckfox Pico Mini RV
 
   ![Tri-Partite Memory](assets/blotcat-memory.png)
 - **Telegram / CLI channels** — Long-poll for TG, interactive for CLI. Features a strict C-level Markdown-to-HTML translator for perfect Telegram message formatting without breaking JSON.
+- **Native Hardware Control (Zero-Token Mode)** — Fully abstracted GPIO and I2C manipulation via Telegram `ReplyKeyboardMarkup` wizards. Interactive Menus allow creating component aliases (`LED`, `OLED`, `SERVO`) and bypassing the LLM completely for instant, free hardware actuation.
+- **Autonomous Robot Mode (AI-Agent Mode)** — Hardware commands (`hw_gpio`, `hw_i2c`) are registered as native tools, allowing the AI to autonomously read sensor data (e.g. MPU6050 gyroscope) and write to GPIO pins to achieve complex robotics goals.
 - **Caveman system prompt** — <200 token, keyword-driven.
 
 ## Architecture
@@ -36,12 +38,13 @@ src/main.c              Entry: agent / gateway / status / doctor
 src/config.c            JSON config + ENV overrides → OpenCode endpoint
 src/agent.c             Chat loop: push_msg → LLM → tools → response
 src/provider.c          OpenAI-compatible OpenCode → Kilo provider chain
-src/commands.c          Tool registration + Telegram commands
+src/hardware.c          GPIO and I2C hardware abstraction + Alias mapping
+src/commands.c          Tool registration + Telegram Interactive Wizards
 src/tools.c             13 built-in tools
 src/mcp_builtin.c       reasoning + Tavily + Wikipedia + Guardian tools
 src/mcp.c               External MCP client (optional)
 src/memory.c            Guardian memory backend (JSONL persistence)
-src/channel.c           Telegram long-poll
+src/channel.c           Telegram long-poll + Inline keyboard injection
 src/gateway.c           HTTP REST gateway
 src/http.c              BearSSL native TLS (no libcurl, no OpenSSL)
 src/json.c              JSON parser + writer
@@ -94,8 +97,10 @@ systemctl --user enable --now t1a.service
 |---------|-------------|
 | `/status` | Unit health, tools, memory backend |
 | `/reset` | Clear chat history |
-| `/compact` | Remove the oldest 25% of context; also runs automatically at 256 messages |
+| `/compact` | Remove the oldest 25% of context |
 | `/restart` | Reboot T1a binary |
+| `/gpio` | Opens interactive wizard to Write/Read/Map/Unmap GPIO pins natively |
+| `/i2c` | Opens interactive wizard to Write/Read/Scan/Map I2C devices natively |
 | `/help` | Command list |
 
 ## Philosophy
