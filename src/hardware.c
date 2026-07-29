@@ -14,6 +14,34 @@
 
 static bool s_is_luckfox = false;
 
+typedef struct {
+    char name[32];
+    int pin;
+} gpio_alias_t;
+
+static gpio_alias_t s_gpio_aliases[64];
+static int s_gpio_alias_count = 0;
+
+static int parse_raw_gpio_pin(const char *str) {
+    if (strncmp(str, "GPIO", 4) == 0 || strncmp(str, "gpio", 4) == 0) {
+        int bank = str[4] - '0';
+        if (bank < 0 || bank > 4) return -1;
+        if (str[5] != '_') return -1;
+        char group_char = str[6];
+        int group = -1;
+        if (group_char >= 'A' && group_char <= 'D') group = group_char - 'A';
+        else if (group_char >= 'a' && group_char <= 'd') group = group_char - 'a';
+        else return -1;
+        int pin = str[7] - '0';
+        if (pin < 0 || pin > 7) return -1;
+        return (bank * 32) + (group * 8) + pin;
+    }
+    char *endptr;
+    long val = strtol(str, &endptr, 10);
+    if (*endptr == '\0' && val >= 0) return (int)val;
+    return -1;
+}
+
 void nc_hardware_init(void) {
     char hw[128];
     nc_detect_hardware(hw, sizeof(hw));
@@ -21,6 +49,35 @@ void nc_hardware_init(void) {
         s_is_luckfox = true;
     } else {
         s_is_luckfox = false;
+    }
+
+    FILE *f = fopen("gpio_aliases.txt", "r");
+    if (f) {
+        char line[128];
+        while (fgets(line, sizeof(line), f) && s_gpio_alias_count < 64) {
+            char *eq = strchr(line, '=');
+            if (eq) {
+                *eq = '\0';
+                char *name = line;
+                char *val = eq + 1;
+                while (*name == ' ' || *name == '\t') name++;
+                char *end = name + strlen(name) - 1;
+                while (end >= name && (*end == ' ' || *end == '\t')) *end-- = '\0';
+
+                while (*val == ' ' || *val == '\t') val++;
+                end = val + strlen(val) - 1;
+                while (end >= val && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) *end-- = '\0';
+
+                if (name[0] != '\0' && val[0] != '\0') {
+                    nc_strlcpy(s_gpio_aliases[s_gpio_alias_count].name, name, 32);
+                    s_gpio_aliases[s_gpio_alias_count].pin = parse_raw_gpio_pin(val);
+                    if (s_gpio_aliases[s_gpio_alias_count].pin >= 0) {
+                        s_gpio_alias_count++;
+                    }
+                }
+            }
+        }
+        fclose(f);
     }
 }
 
@@ -116,23 +173,12 @@ int nc_i2c_read(int fd, unsigned char *data, size_t len) {
 /* ── Tool Integrations ──────────────────────────────────────────── */
 
 static int parse_gpio_pin(const char *str) {
-    if (strncmp(str, "GPIO", 4) == 0 || strncmp(str, "gpio", 4) == 0) {
-        int bank = str[4] - '0';
-        if (bank < 0 || bank > 4) return -1;
-        if (str[5] != '_') return -1;
-        char group_char = str[6];
-        int group = -1;
-        if (group_char >= 'A' && group_char <= 'D') group = group_char - 'A';
-        else if (group_char >= 'a' && group_char <= 'd') group = group_char - 'a';
-        else return -1;
-        int pin = str[7] - '0';
-        if (pin < 0 || pin > 7) return -1;
-        return (bank * 32) + (group * 8) + pin;
+    for (int i = 0; i < s_gpio_alias_count; i++) {
+        if (strcasecmp(str, s_gpio_aliases[i].name) == 0) {
+            return s_gpio_aliases[i].pin;
+        }
     }
-    char *endptr;
-    long val = strtol(str, &endptr, 10);
-    if (*endptr == '\0' && val >= 0) return (int)val;
-    return -1;
+    return parse_raw_gpio_pin(str);
 }
 
 static bool hw_gpio_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
@@ -218,7 +264,7 @@ nc_tool nc_tool_hw_gpio(void) {
     return (nc_tool){
         .def = {
             .name = "hw_gpio",
-            .description = "Control hardware GPIO pins. Actions: export, unexport, set_dir, write, read. Pin format: 'GPIO1_C7' or '55'.",
+            .description = "Control hardware GPIO pins. Actions: export, unexport, set_dir, write, read. Pin format: 'LED', 'GPIO1_C7', or '55'. Map aliases in gpio_aliases.txt",
             .parameters_json = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"pin\":{\"type\":\"string\"},\"dir\":{\"type\":\"string\"},\"val\":{\"type\":\"string\"}},\"required\":[\"action\",\"pin\"]}",
         },
         .execute = hw_gpio_execute,
