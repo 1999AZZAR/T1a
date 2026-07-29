@@ -395,6 +395,9 @@ bool nc_gpio_write(int pin, int val);
 int  nc_gpio_read(int pin);
 
 /* I2C */
+bool nc_i2c_set_alias(const char *name, int bus, int addr);
+bool nc_i2c_remove_alias(const char *name);
+bool nc_i2c_resolve_alias(const char *name, int *bus, int *addr);
 int  nc_i2c_open(int bus, int addr);
 void nc_i2c_close(int fd);
 int  nc_i2c_write(int fd, const unsigned char *data, size_t len);

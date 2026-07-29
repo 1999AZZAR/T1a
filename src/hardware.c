@@ -22,6 +22,15 @@ typedef struct {
 static gpio_alias_t s_gpio_aliases[64];
 static int s_gpio_alias_count = 0;
 
+typedef struct {
+    char name[32];
+    int bus;
+    int addr;
+} i2c_alias_t;
+
+static i2c_alias_t s_i2c_aliases[64];
+static int s_i2c_alias_count = 0;
+
 static int parse_raw_gpio_pin(const char *str) {
     if (strncmp(str, "GPIO", 4) == 0 || strncmp(str, "gpio", 4) == 0) {
         int bank = str[4] - '0';
@@ -79,6 +88,22 @@ void nc_hardware_init(void) {
         }
         fclose(f);
     }
+
+    FILE *f_i2c = fopen("i2c_aliases.txt", "r");
+    if (f_i2c) {
+        char line[128];
+        while (fgets(line, sizeof(line), f_i2c) && s_i2c_alias_count < 64) {
+            char name[32];
+            int bus, addr;
+            if (sscanf(line, "%31[^=]=%d:%x", name, &bus, &addr) == 3) {
+                nc_strlcpy(s_i2c_aliases[s_i2c_alias_count].name, name, 32);
+                s_i2c_aliases[s_i2c_alias_count].bus = bus;
+                s_i2c_aliases[s_i2c_alias_count].addr = addr;
+                s_i2c_alias_count++;
+            }
+        }
+        fclose(f_i2c);
+    }
 }
 
 bool nc_gpio_set_alias(const char *name, const char *pin_str) {
@@ -132,6 +157,65 @@ bool nc_gpio_remove_alias(const char *name) {
     }
     fclose(f);
     return true;
+}
+
+bool nc_i2c_set_alias(const char *name, int bus, int addr) {
+    bool found = false;
+    for (int i = 0; i < s_i2c_alias_count; i++) {
+        if (strcasecmp(s_i2c_aliases[i].name, name) == 0) {
+            s_i2c_aliases[i].bus = bus;
+            s_i2c_aliases[i].addr = addr;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        if (s_i2c_alias_count >= 64) return false;
+        nc_strlcpy(s_i2c_aliases[s_i2c_alias_count].name, name, 32);
+        s_i2c_aliases[s_i2c_alias_count].bus = bus;
+        s_i2c_aliases[s_i2c_alias_count].addr = addr;
+        s_i2c_alias_count++;
+    }
+    FILE *f = fopen("i2c_aliases.txt", "w");
+    if (!f) return false;
+    for (int i = 0; i < s_i2c_alias_count; i++) {
+        fprintf(f, "%s=%d:0x%02X\n", s_i2c_aliases[i].name, s_i2c_aliases[i].bus, s_i2c_aliases[i].addr);
+    }
+    fclose(f);
+    return true;
+}
+
+bool nc_i2c_remove_alias(const char *name) {
+    bool found = false;
+    for (int i = 0; i < s_i2c_alias_count; i++) {
+        if (strcasecmp(s_i2c_aliases[i].name, name) == 0) {
+            for (int j = i; j < s_i2c_alias_count - 1; j++) {
+                s_i2c_aliases[j] = s_i2c_aliases[j + 1];
+            }
+            s_i2c_alias_count--;
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
+    FILE *f = fopen("i2c_aliases.txt", "w");
+    if (!f) return false;
+    for (int i = 0; i < s_i2c_alias_count; i++) {
+        fprintf(f, "%s=%d:0x%02X\n", s_i2c_aliases[i].name, s_i2c_aliases[i].bus, s_i2c_aliases[i].addr);
+    }
+    fclose(f);
+    return true;
+}
+
+bool nc_i2c_resolve_alias(const char *name, int *bus, int *addr) {
+    for (int i = 0; i < s_i2c_alias_count; i++) {
+        if (strcasecmp(s_i2c_aliases[i].name, name) == 0) {
+            *bus = s_i2c_aliases[i].bus;
+            *addr = s_i2c_aliases[i].addr;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool nc_hardware_is_luckfox(void) {

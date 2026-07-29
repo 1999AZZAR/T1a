@@ -114,7 +114,13 @@ typedef enum {
     S_WIZ_I2C_LEN_R,
     S_WIZ_I2C_BUS_W,
     S_WIZ_I2C_ADDR_W,
-    S_WIZ_I2C_HEX_W
+    S_WIZ_I2C_HEX_W,
+    S_WIZ_I2C_MAP_NAME,
+    S_WIZ_I2C_MAP_BUS,
+    S_WIZ_I2C_MAP_ADDR,
+    S_WIZ_I2C_UNMAP_NAME,
+    S_WIZ_I2C_DEV_R,
+    S_WIZ_I2C_DEV_W
 } wizard_state_t;
 
 static wizard_state_t s_wiz_state = S_WIZ_IDLE;
@@ -221,10 +227,16 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
                 chan->send(chan, to_buf, "Enter I2C bus number (e.g. 3):||KBD:{\"remove_keyboard\":true}");
             } else if (strcmp(cmd, "Read") == 0) {
                 s_wiz_state = S_WIZ_I2C_BUS_R;
-                chan->send(chan, to_buf, "Enter I2C bus number (e.g. 3):||KBD:{\"remove_keyboard\":true}");
+                chan->send(chan, to_buf, "Enter I2C bus number (or send alias name like OLED):||KBD:{\"remove_keyboard\":true}");
             } else if (strcmp(cmd, "Write") == 0) {
                 s_wiz_state = S_WIZ_I2C_BUS_W;
-                chan->send(chan, to_buf, "Enter I2C bus number (e.g. 3):||KBD:{\"remove_keyboard\":true}");
+                chan->send(chan, to_buf, "Enter I2C bus number (or send alias name like OLED):||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Map") == 0) {
+                s_wiz_state = S_WIZ_I2C_MAP_NAME;
+                chan->send(chan, to_buf, "Enter new alias name (e.g. OLED):||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Unmap") == 0) {
+                s_wiz_state = S_WIZ_I2C_UNMAP_NAME;
+                chan->send(chan, to_buf, "Enter alias name to remove:||KBD:{\"remove_keyboard\":true}");
             } else {
                 s_wiz_state = S_WIZ_IDLE;
                 chan->send(chan, to_buf, "Invalid operation. Cancelled.||KBD:{\"remove_keyboard\":true}");
@@ -245,6 +257,14 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         }
 
         if (s_wiz_state == S_WIZ_I2C_BUS_R) {
+            int resolved_bus, resolved_addr;
+            if (nc_i2c_resolve_alias(cmd, &resolved_bus, &resolved_addr)) {
+                snprintf(s_wiz_bus, sizeof(s_wiz_bus), "%d", resolved_bus);
+                snprintf(s_wiz_addr, sizeof(s_wiz_addr), "%d", resolved_addr);
+                s_wiz_state = S_WIZ_I2C_LEN_R;
+                chan->send(chan, to_buf, "Alias found! Enter number of bytes to read:");
+                return true;
+            }
             nc_strlcpy(s_wiz_bus, cmd, sizeof(s_wiz_bus));
             s_wiz_state = S_WIZ_I2C_ADDR_R;
             chan->send(chan, to_buf, "Enter I2C device address (e.g. 0x3C):");
@@ -271,6 +291,14 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         }
 
         if (s_wiz_state == S_WIZ_I2C_BUS_W) {
+            int resolved_bus, resolved_addr;
+            if (nc_i2c_resolve_alias(cmd, &resolved_bus, &resolved_addr)) {
+                snprintf(s_wiz_bus, sizeof(s_wiz_bus), "%d", resolved_bus);
+                snprintf(s_wiz_addr, sizeof(s_wiz_addr), "%d", resolved_addr);
+                s_wiz_state = S_WIZ_I2C_HEX_W;
+                chan->send(chan, to_buf, "Alias found! Enter hex payload to write (e.g. A1B2):");
+                return true;
+            }
             nc_strlcpy(s_wiz_bus, cmd, sizeof(s_wiz_bus));
             s_wiz_state = S_WIZ_I2C_ADDR_W;
             chan->send(chan, to_buf, "Enter I2C device address (e.g. 0x3C):");
@@ -293,6 +321,42 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             char out[1024];
             snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
             chan->send(chan, to_buf, out);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_MAP_NAME) {
+            nc_strlcpy(s_wiz_name, cmd, sizeof(s_wiz_name));
+            s_wiz_state = S_WIZ_I2C_MAP_BUS;
+            chan->send(chan, to_buf, "Enter I2C bus number:");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_MAP_BUS) {
+            nc_strlcpy(s_wiz_bus, cmd, sizeof(s_wiz_bus));
+            s_wiz_state = S_WIZ_I2C_MAP_ADDR;
+            chan->send(chan, to_buf, "Enter I2C device address (e.g. 0x3C):");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_MAP_ADDR) {
+            if (nc_i2c_set_alias(s_wiz_name, atoi(s_wiz_bus), (int)strtol(cmd, NULL, 0))) {
+                snprintf(reply, sizeof(reply), "success: mapped '%s' to bus %s addr %s", s_wiz_name, s_wiz_bus, cmd);
+            } else {
+                snprintf(reply, sizeof(reply), "error: failed to map");
+            }
+            s_wiz_state = S_WIZ_IDLE;
+            chan->send(chan, to_buf, reply);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_UNMAP_NAME) {
+            if (nc_i2c_remove_alias(cmd)) {
+                snprintf(reply, sizeof(reply), "success: removed mapping for '%s'", cmd);
+            } else {
+                snprintf(reply, sizeof(reply), "error: alias '%s' not found", cmd);
+            }
+            s_wiz_state = S_WIZ_IDLE;
+            chan->send(chan, to_buf, reply);
             return true;
         }
     }
@@ -364,7 +428,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         snprintf(reply, sizeof(reply), "Choose GPIO operation:||KBD:{\"keyboard\":[[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Map\"},{\"text\":\"Unmap\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
     } else if (strcmp(cmd, "/i2c") == 0) {
         s_wiz_state = S_WIZ_I2C_OP;
-        snprintf(reply, sizeof(reply), "Choose I2C operation:||KBD:{\"keyboard\":[[{\"text\":\"Scan\"}],[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
+        snprintf(reply, sizeof(reply), "Choose I2C operation:||KBD:{\"keyboard\":[[{\"text\":\"Scan\"}],[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Map\"},{\"text\":\"Unmap\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
     } else if (strncmp(cmd, "/export_gpio ", 13) == 0) {
         char pin[32] = {0};
         sscanf(cmd + 13, "%31s", pin);
