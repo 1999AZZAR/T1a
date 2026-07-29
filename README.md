@@ -4,6 +4,8 @@ T1a is an ultra-lightweight AI agent built in C, designed to run one-per-device
 on resource-constrained hardware (Luckfox Pico Mini, ESP32-class SBCs).
 ~153KB binary (~128KiB allocated), ~2MiB idle RAM, BearSSL only beyond libc.
 
+![T1a Core Architecture](assets/blotcat-architecture.png)
+
 ## Key Features
 
 - **OpenCode provider** — Free (`opencode.ai/zen/v1`), per-device rate limit.
@@ -14,12 +16,16 @@ on resource-constrained hardware (Luckfox Pico Mini, ESP32-class SBCs).
 - **Cross-provider recovery** — Falls back to Kilo Gateway's `openrouter/free`
   when OpenCode fails or reaches its account-wide limit. No Kilo CLI required.
   Anonymous access needs no key; `KILO_API_KEY` is optional.
+
+  ![Provider Fallback](assets/blotcat-fallback.png)
 - **4 built-in MCP tools** — Reasoning (sequential thinking), web search (Tavily),
   encyclopedia (Wikipedia), persistent memory (Guardian). No Node.js required.
 - **Tri-Partite Cognitive Memory (Zero-Dep)** —
   1. **Core Memory**: Editable facts injected into every prompt (`core_memory.txt`).
   2. **Recall Memory**: Short-term sliding window of 256 messages, saved efficiently to `chat.bin` to survive restarts, with auto-compaction and summarization.
   3. **Archival Memory**: JSONL-backed Guardian entity store for deep knowledge.
+
+  ![Tri-Partite Memory](assets/blotcat-memory.png)
 - **Telegram / CLI channels** — Long-poll for TG, interactive for CLI. Features a strict C-level Markdown-to-HTML translator for perfect Telegram message formatting without breaking JSON.
 - **Caveman system prompt** — <200 token, keyword-driven.
 
