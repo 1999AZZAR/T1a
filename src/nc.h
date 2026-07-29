@@ -379,6 +379,23 @@ bool  nc_file_exists(const char *path);
 void nc_random_hex(char *out, size_t len);
 void nc_detect_hardware(char *out, size_t cap);
 
+/* Hardware Abstraction (Luckfox RV1103 / Dev Mock) */
+void nc_hardware_init(void);
+bool nc_hardware_is_luckfox(void);
+
+/* GPIO */
+bool nc_gpio_export(int pin);
+bool nc_gpio_unexport(int pin);
+bool nc_gpio_set_dir(int pin, const char *dir); /* "in" or "out" */
+bool nc_gpio_write(int pin, int val);
+int  nc_gpio_read(int pin);
+
+/* I2C */
+int  nc_i2c_open(int bus, int addr);
+void nc_i2c_close(int fd);
+int  nc_i2c_write(int fd, const unsigned char *data, size_t len);
+int  nc_i2c_read(int fd, unsigned char *data, size_t len);
+
 #ifdef NC_TEST
 extern int nc_test_pass;
 extern int nc_test_fail;
