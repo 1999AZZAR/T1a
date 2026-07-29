@@ -267,13 +267,60 @@ static bool hw_i2c_execute(nc_tool *self, const char *args_json, char *out, size
         }
     }
 
-    if (action[0] == '\0' || bus_str[0] == '\0' || addr_str[0] == '\0') {
-        snprintf(out, out_cap, "error: action, bus, and addr are required");
+    if (action[0] == '\0' || bus_str[0] == '\0') {
+        snprintf(out, out_cap, "error: action and bus are required");
         return true;
     }
 
     int bus = atoi(bus_str);
-    int addr = atoi(addr_str);
+    int addr = addr_str[0] ? atoi(addr_str) : 0;
+
+    if (strcmp(action, "scan") == 0) {
+        char scan_out[256];
+        scan_out[0] = '\0';
+        int found = 0;
+        char path[64];
+        snprintf(path, sizeof(path), "/dev/i2c-%d", bus);
+        int fd = s_is_luckfox ? open(path, O_RDWR) : 9999;
+        if (fd < 0) {
+            snprintf(out, out_cap, "error: failed to open I2C bus %d for scanning", bus);
+            return true;
+        }
+
+        for (int a = 0x03; a < 0x78; a++) {
+            if (s_is_luckfox) {
+                if (ioctl(fd, I2C_SLAVE, a) >= 0) {
+                    unsigned char buf;
+                    if (read(fd, &buf, 1) >= 0) {
+                        char addr_hex[16];
+                        snprintf(addr_hex, sizeof(addr_hex), "\"0x%02X\",", a);
+                        strcat(scan_out, addr_hex);
+                        found++;
+                    }
+                }
+            } else {
+                if (a == 0x3C || a == 0x68) { // mock devices
+                    char addr_hex[16];
+                    snprintf(addr_hex, sizeof(addr_hex), "\"0x%02X\",", a);
+                    strcat(scan_out, addr_hex);
+                    found++;
+                }
+            }
+        }
+        if (s_is_luckfox) close(fd);
+        if (found > 0) {
+            scan_out[strlen(scan_out)-1] = '\0'; // remove last comma
+            snprintf(out, out_cap, "{\"found\":%d,\"addresses\":[%s]}", found, scan_out);
+        } else {
+            snprintf(out, out_cap, "{\"found\":0,\"addresses\":[]}");
+        }
+        return true;
+    }
+
+    if (addr_str[0] == '\0') {
+        snprintf(out, out_cap, "error: addr is required for read/write");
+        return true;
+    }
 
     int fd = nc_i2c_open(bus, addr);
     if (fd < 0) {
@@ -317,8 +364,8 @@ nc_tool nc_tool_hw_i2c(void) {
     return (nc_tool){
         .def = {
             .name = "hw_i2c",
-            .description = "Control hardware I2C bus. Actions: write, read. Provide bus and addr as integers. For write, provide data_hex. For read, provide read_len.",
-            .parameters_json = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"bus\":{\"type\":\"integer\"},\"addr\":{\"type\":\"integer\"},\"data_hex\":{\"type\":\"string\"},\"read_len\":{\"type\":\"integer\"}},\"required\":[\"action\",\"bus\",\"addr\"]}",
+            .description = "Control hardware I2C bus. Actions: scan, write, read. Provide bus and addr as integers. For write, provide data_hex. For read, provide read_len. For scan, only bus is required.",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"bus\":{\"type\":\"integer\"},\"addr\":{\"type\":\"integer\"},\"data_hex\":{\"type\":\"string\"},\"read_len\":{\"type\":\"integer\"}},\"required\":[\"action\",\"bus\"]}",
         },
         .execute = hw_i2c_execute,
     };
