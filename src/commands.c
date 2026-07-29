@@ -103,11 +103,15 @@ typedef enum {
     S_WIZ_GPIO_OP,
     S_WIZ_GPIO_PIN_W,
     S_WIZ_GPIO_VAL_W,
-    S_WIZ_GPIO_PIN_R
+    S_WIZ_GPIO_PIN_R,
+    S_WIZ_GPIO_MAP_NAME,
+    S_WIZ_GPIO_MAP_PIN,
+    S_WIZ_GPIO_UNMAP_NAME
 } wizard_state_t;
 
 static wizard_state_t s_wiz_state = S_WIZ_IDLE;
 static char s_wiz_pin[32] = {0};
+static char s_wiz_name[32] = {0};
 
 bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_channel *chan) {
     char reply[1024];
@@ -128,6 +132,12 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             } else if (strcmp(cmd, "Read") == 0) {
                 s_wiz_state = S_WIZ_GPIO_PIN_R;
                 chan->send(chan, to_buf, "Enter pin name or number:||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Map") == 0) {
+                s_wiz_state = S_WIZ_GPIO_MAP_NAME;
+                chan->send(chan, to_buf, "Enter new alias name (e.g. LED):||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Unmap") == 0) {
+                s_wiz_state = S_WIZ_GPIO_UNMAP_NAME;
+                chan->send(chan, to_buf, "Enter alias name to remove:||KBD:{\"remove_keyboard\":true}");
             } else {
                 s_wiz_state = S_WIZ_IDLE;
                 chan->send(chan, to_buf, "Invalid operation. Cancelled.||KBD:{\"remove_keyboard\":true}");
@@ -163,6 +173,35 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             char out[1024];
             snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
             chan->send(chan, to_buf, out);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_MAP_NAME) {
+            nc_strlcpy(s_wiz_name, cmd, sizeof(s_wiz_name));
+            s_wiz_state = S_WIZ_GPIO_MAP_PIN;
+            chan->send(chan, to_buf, "Enter pin header/number to map to:");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_MAP_PIN) {
+            if (nc_gpio_set_alias(s_wiz_name, cmd)) {
+                snprintf(reply, sizeof(reply), "success: mapped '%s' to pin '%s'", s_wiz_name, cmd);
+            } else {
+                snprintf(reply, sizeof(reply), "error: failed to map (invalid pin or table full)");
+            }
+            s_wiz_state = S_WIZ_IDLE;
+            chan->send(chan, to_buf, reply);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_UNMAP_NAME) {
+            if (nc_gpio_remove_alias(cmd)) {
+                snprintf(reply, sizeof(reply), "success: removed mapping for '%s'", cmd);
+            } else {
+                snprintf(reply, sizeof(reply), "error: alias '%s' not found", cmd);
+            }
+            s_wiz_state = S_WIZ_IDLE;
+            chan->send(chan, to_buf, reply);
             return true;
         }
     }
@@ -230,7 +269,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         }
     } else if (strcmp(cmd, "/gpio") == 0) {
         s_wiz_state = S_WIZ_GPIO_OP;
-        snprintf(reply, sizeof(reply), "Choose GPIO operation:||KBD:{\"keyboard\":[[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
+        snprintf(reply, sizeof(reply), "Choose GPIO operation:||KBD:{\"keyboard\":[[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Map\"},{\"text\":\"Unmap\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
     } else if (strncmp(cmd, "/export_gpio ", 13) == 0) {
         char pin[32] = {0};
         sscanf(cmd + 13, "%31s", pin);
