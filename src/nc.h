@@ -276,6 +276,8 @@ nc_tool nc_tool_memory_store(void *mem_ctx);
 nc_tool nc_tool_memory_recall(void *mem_ctx);
 nc_tool nc_tool_get_time(void);
 nc_tool nc_tool_sys_info(void);
+nc_tool nc_tool_hw_gpio(void);
+nc_tool nc_tool_hw_i2c(void);
 nc_tool nc_tool_calc(void);
 nc_tool nc_tool_http_fetch(void);
 nc_tool nc_tool_list_dir(const nc_config *cfg);

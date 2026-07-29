@@ -112,3 +112,214 @@ int nc_i2c_read(int fd, unsigned char *data, size_t len) {
     }
     return (int)read(fd, data, len);
 }
+
+/* ── Tool Integrations ──────────────────────────────────────────── */
+
+static int parse_gpio_pin(const char *str) {
+    if (strncmp(str, "GPIO", 4) == 0 || strncmp(str, "gpio", 4) == 0) {
+        int bank = str[4] - '0';
+        if (bank < 0 || bank > 4) return -1;
+        if (str[5] != '_') return -1;
+        char group_char = str[6];
+        int group = -1;
+        if (group_char >= 'A' && group_char <= 'D') group = group_char - 'A';
+        else if (group_char >= 'a' && group_char <= 'd') group = group_char - 'a';
+        else return -1;
+        int pin = str[7] - '0';
+        if (pin < 0 || pin > 7) return -1;
+        return (bank * 32) + (group * 8) + pin;
+    }
+    char *endptr;
+    long val = strtol(str, &endptr, 10);
+    if (*endptr == '\0' && val >= 0) return (int)val;
+    return -1;
+}
+
+static bool hw_gpio_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
+    (void)self;
+    char action[32] = {0}, pin_str[32] = {0}, dir_str[32] = {0}, val_str[32] = {0};
+
+    // Naive JSON extraction
+    const char *keys[] = {"action", "pin", "dir", "val"};
+    char *outs[] = {action, pin_str, dir_str, val_str};
+    const size_t caps[] = {sizeof(action), sizeof(pin_str), sizeof(dir_str), sizeof(val_str)};
+
+    for (int i = 0; i < 4; i++) {
+        char search_key[32];
+        snprintf(search_key, sizeof(search_key), "\"%s\"", keys[i]);
+        char *p = strstr(args_json, search_key);
+        if (p) {
+            p += strlen(search_key);
+            while (*p == ' ' || *p == ':') p++;
+            if (*p == '"') {
+                p++;
+                char *end = strchr(p, '"');
+                if (end) {
+                    size_t len = end - p;
+                    if (len >= caps[i]) len = caps[i] - 1;
+                    strncpy(outs[i], p, len);
+                    outs[i][len] = '\0';
+                }
+            } else if (*p >= '0' && *p <= '9') {
+                char *end = p;
+                while (*end >= '0' && *end <= '9') end++;
+                size_t len = end - p;
+                if (len >= caps[i]) len = caps[i] - 1;
+                strncpy(outs[i], p, len);
+                outs[i][len] = '\0';
+            }
+        }
+    }
+
+    if (action[0] == '\0' || pin_str[0] == '\0') {
+        snprintf(out, out_cap, "error: action and pin are required");
+        return true;
+    }
+
+    int pin = parse_gpio_pin(pin_str);
+    if (pin < 0) {
+        snprintf(out, out_cap, "error: invalid pin format (use GPIO1_C7 or integer)");
+        return true;
+    }
+
+    if (strcmp(action, "export") == 0) {
+        bool ok = nc_gpio_export(pin);
+        snprintf(out, out_cap, ok ? "success: exported GPIO %d" : "error: failed to export GPIO %d", pin);
+    } else if (strcmp(action, "unexport") == 0) {
+        bool ok = nc_gpio_unexport(pin);
+        snprintf(out, out_cap, ok ? "success: unexported GPIO %d" : "error: failed to unexport GPIO %d", pin);
+    } else if (strcmp(action, "set_dir") == 0) {
+        if (dir_str[0] == '\0') {
+            snprintf(out, out_cap, "error: dir is required for set_dir");
+            return true;
+        }
+        bool ok = nc_gpio_set_dir(pin, dir_str);
+        if (ok) snprintf(out, out_cap, "success: set dir %s for GPIO %d", dir_str, pin);
+        else snprintf(out, out_cap, "error: failed to set dir for GPIO %d", pin);
+    } else if (strcmp(action, "write") == 0) {
+        if (val_str[0] == '\0') {
+            snprintf(out, out_cap, "error: val is required for write");
+            return true;
+        }
+        int val = atoi(val_str);
+        bool ok = nc_gpio_write(pin, val);
+        snprintf(out, out_cap, ok ? "success: wrote %d to GPIO %d" : "error: failed to write to GPIO %d", val, pin);
+    } else if (strcmp(action, "read") == 0) {
+        int val = nc_gpio_read(pin);
+        if (val < 0) snprintf(out, out_cap, "error: failed to read GPIO %d", pin);
+        else snprintf(out, out_cap, "{\"pin\":%d,\"value\":%d}", pin, val);
+    } else {
+        snprintf(out, out_cap, "error: unknown action");
+    }
+    return true;
+}
+
+nc_tool nc_tool_hw_gpio(void) {
+    return (nc_tool){
+        .def = {
+            .name = "hw_gpio",
+            .description = "Control hardware GPIO pins. Actions: export, unexport, set_dir, write, read. Pin format: 'GPIO1_C7' or '55'.",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"pin\":{\"type\":\"string\"},\"dir\":{\"type\":\"string\"},\"val\":{\"type\":\"string\"}},\"required\":[\"action\",\"pin\"]}",
+        },
+        .execute = hw_gpio_execute,
+    };
+}
+
+static int hex_char_to_int(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+static bool hw_i2c_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
+    (void)self;
+    char action[32] = {0}, bus_str[16] = {0}, addr_str[16] = {0}, data_hex[256] = {0}, read_len_str[16] = {0};
+
+    const char *keys[] = {"action", "bus", "addr", "data_hex", "read_len"};
+    char *outs[] = {action, bus_str, addr_str, data_hex, read_len_str};
+    const size_t caps[] = {sizeof(action), sizeof(bus_str), sizeof(addr_str), sizeof(data_hex), sizeof(read_len_str)};
+
+    for (int i = 0; i < 5; i++) {
+        char search_key[32];
+        snprintf(search_key, sizeof(search_key), "\"%s\"", keys[i]);
+        char *p = strstr(args_json, search_key);
+        if (p) {
+            p += strlen(search_key);
+            while (*p == ' ' || *p == ':') p++;
+            if (*p == '"') {
+                p++;
+                char *end = strchr(p, '"');
+                if (end) {
+                    size_t len = end - p;
+                    if (len >= caps[i]) len = caps[i] - 1;
+                    strncpy(outs[i], p, len);
+                    outs[i][len] = '\0';
+                }
+            } else if (*p >= '0' && *p <= '9') {
+                char *end = p;
+                while (*end >= '0' && *end <= '9') end++;
+                size_t len = end - p;
+                if (len >= caps[i]) len = caps[i] - 1;
+                strncpy(outs[i], p, len);
+                outs[i][len] = '\0';
+            }
+        }
+    }
+
+    if (action[0] == '\0' || bus_str[0] == '\0' || addr_str[0] == '\0') {
+        snprintf(out, out_cap, "error: action, bus, and addr are required");
+        return true;
+    }
+
+    int bus = atoi(bus_str);
+    int addr = atoi(addr_str);
+
+    int fd = nc_i2c_open(bus, addr);
+    if (fd < 0) {
+        snprintf(out, out_cap, "error: failed to open I2C bus %d at addr 0x%02X", bus, addr);
+        return true;
+    }
+
+    if (strcmp(action, "write") == 0) {
+        unsigned char raw[128];
+        size_t raw_len = 0;
+        size_t hex_len = strlen(data_hex);
+        for (size_t i = 0; i < hex_len && i < 256 && raw_len < 128; i += 2) {
+            raw[raw_len++] = (hex_char_to_int(data_hex[i]) << 4) | hex_char_to_int(data_hex[i+1]);
+        }
+        int w = nc_i2c_write(fd, raw, raw_len);
+        nc_i2c_close(fd);
+        snprintf(out, out_cap, w >= 0 ? "success: wrote %d bytes" : "error: write failed", w);
+    } else if (strcmp(action, "read") == 0) {
+        int rlen = atoi(read_len_str);
+        if (rlen <= 0 || rlen > 128) rlen = 1;
+        unsigned char raw[128];
+        int r = nc_i2c_read(fd, raw, rlen);
+        nc_i2c_close(fd);
+        if (r < 0) {
+            snprintf(out, out_cap, "error: read failed");
+        } else {
+            char hex_out[257];
+            for (int i = 0; i < r; i++) {
+                sprintf(hex_out + (i * 2), "%02X", raw[i]);
+            }
+            snprintf(out, out_cap, "{\"read_bytes\":%d,\"data_hex\":\"%s\"}", r, hex_out);
+        }
+    } else {
+        nc_i2c_close(fd);
+        snprintf(out, out_cap, "error: unknown action");
+    }
+    return true;
+}
+
+nc_tool nc_tool_hw_i2c(void) {
+    return (nc_tool){
+        .def = {
+            .name = "hw_i2c",
+            .description = "Control hardware I2C bus. Actions: write, read. Provide bus and addr as integers. For write, provide data_hex. For read, provide read_len.",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"bus\":{\"type\":\"integer\"},\"addr\":{\"type\":\"integer\"},\"data_hex\":{\"type\":\"string\"},\"read_len\":{\"type\":\"integer\"}},\"required\":[\"action\",\"bus\",\"addr\"]}",
+        },
+        .execute = hw_i2c_execute,
+    };
+}
