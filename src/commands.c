@@ -135,6 +135,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             "/reset   - Clear chat history\n"
             "/compact - Trim oldest context\n"
             "/restart - Force binary reboot\n"
+            "/map_gpio <name> <pin> - Map alias\n"
             "/set_gpio <pin> <val> - Write GPIO\n"
             "/read_gpio <pin>      - Read GPIO\n"
             "/i2c_scan <bus>       - Scan I2C bus\n"
@@ -145,6 +146,14 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             "- Web browsing & search\n"
             "- Hardware GPIO & I2C control\n"
             "- Persistent memory (guardian)");
+    } else if (strncmp(cmd, "/map_gpio ", 10) == 0) {
+        char name[32] = {0}, pin_str[32] = {0};
+        sscanf(cmd + 10, "%31s %31s", name, pin_str);
+        if (nc_gpio_set_alias(name, pin_str)) {
+            snprintf(reply, sizeof(reply), "success: mapped '%s' to pin '%s'", name, pin_str);
+        } else {
+            snprintf(reply, sizeof(reply), "error: failed to map (invalid pin or table full)");
+        }
     } else if (strncmp(cmd, "/set_gpio ", 10) == 0) {
         char pin[32] = {0}, val[32] = {0};
         sscanf(cmd + 10, "%31s %31s", pin, val);

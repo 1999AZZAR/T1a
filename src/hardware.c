@@ -81,6 +81,35 @@ void nc_hardware_init(void) {
     }
 }
 
+bool nc_gpio_set_alias(const char *name, const char *pin_str) {
+    int pin = parse_raw_gpio_pin(pin_str);
+    if (pin < 0) return false;
+
+    bool found = false;
+    for (int i = 0; i < s_gpio_alias_count; i++) {
+        if (strcasecmp(s_gpio_aliases[i].name, name) == 0) {
+            s_gpio_aliases[i].pin = pin;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        if (s_gpio_alias_count >= 64) return false;
+        nc_strlcpy(s_gpio_aliases[s_gpio_alias_count].name, name, 32);
+        s_gpio_aliases[s_gpio_alias_count].pin = pin;
+        s_gpio_alias_count++;
+    }
+
+    FILE *f = fopen("gpio_aliases.txt", "w");
+    if (!f) return false;
+    for (int i = 0; i < s_gpio_alias_count; i++) {
+        fprintf(f, "%s=%d\n", s_gpio_aliases[i].name, s_gpio_aliases[i].pin);
+    }
+    fclose(f);
+    return true;
+}
+
 bool nc_hardware_is_luckfox(void) {
     return s_is_luckfox;
 }

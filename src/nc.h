@@ -384,6 +384,7 @@ void nc_detect_hardware(char *out, size_t cap);
 /* Hardware Abstraction (Luckfox RV1103 / Dev Mock) */
 void nc_hardware_init(void);
 bool nc_hardware_is_luckfox(void);
+bool nc_gpio_set_alias(const char *name, const char *pin_str);
 
 /* GPIO */
 bool nc_gpio_export(int pin);
