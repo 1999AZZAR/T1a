@@ -224,8 +224,20 @@ static void tg_send_msg(tg_ctx *ctx, long chat_id, const char *text) {
 
     int off = 0;
     off += snprintf(body + off, body_sz - (size_t)off, "{\"chat_id\":%ld,\"text\":\"", chat_id);
-    off = append_escaped_text(body, off, body_sz, text);
-    off += snprintf(body + off, body_sz - (size_t)off, "\",\"parse_mode\":\"HTML\"}");
+
+    const char *kbd = strstr(text, "||KBD:");
+    if (kbd) {
+        char tmp[4096];
+        size_t text_len = kbd - text;
+        if (text_len >= sizeof(tmp)) text_len = sizeof(tmp) - 1;
+        memcpy(tmp, text, text_len);
+        tmp[text_len] = '\0';
+        off = append_escaped_text(body, off, body_sz, tmp);
+        off += snprintf(body + off, body_sz - (size_t)off, "\",\"parse_mode\":\"HTML\",\"reply_markup\":%s}", kbd + 6);
+    } else {
+        off = append_escaped_text(body, off, body_sz, text);
+        off += snprintf(body + off, body_sz - (size_t)off, "\",\"parse_mode\":\"HTML\"}");
+    }
 
     const char *hdrs[] = {"Content-Type: application/json"};
     nc_http_response resp;

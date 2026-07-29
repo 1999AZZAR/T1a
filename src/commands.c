@@ -98,12 +98,76 @@ int nc_cmd_agent(int argc, char **argv) {
     return 0;
 }
 
-bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_channel *chan) {
-    if (cmd[0] != '/') return false;
+typedef enum {
+    S_WIZ_IDLE = 0,
+    S_WIZ_GPIO_OP,
+    S_WIZ_GPIO_PIN_W,
+    S_WIZ_GPIO_VAL_W,
+    S_WIZ_GPIO_PIN_R
+} wizard_state_t;
 
+static wizard_state_t s_wiz_state = S_WIZ_IDLE;
+static char s_wiz_pin[32] = {0};
+
+bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_channel *chan) {
     char reply[1024];
     char to_buf[32];
     snprintf(to_buf, sizeof(to_buf), "%ld", chat_id);
+
+    if (s_wiz_state != S_WIZ_IDLE && cmd[0] != '/') {
+        if (strcasecmp(cmd, "Cancel") == 0) {
+            s_wiz_state = S_WIZ_IDLE;
+            chan->send(chan, to_buf, "Cancelled.||KBD:{\"remove_keyboard\":true}");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_OP) {
+            if (strcmp(cmd, "Write") == 0) {
+                s_wiz_state = S_WIZ_GPIO_PIN_W;
+                chan->send(chan, to_buf, "Enter pin name or number:||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Read") == 0) {
+                s_wiz_state = S_WIZ_GPIO_PIN_R;
+                chan->send(chan, to_buf, "Enter pin name or number:||KBD:{\"remove_keyboard\":true}");
+            } else {
+                s_wiz_state = S_WIZ_IDLE;
+                chan->send(chan, to_buf, "Invalid operation. Cancelled.||KBD:{\"remove_keyboard\":true}");
+            }
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_PIN_W) {
+            nc_strlcpy(s_wiz_pin, cmd, sizeof(s_wiz_pin));
+            s_wiz_state = S_WIZ_GPIO_VAL_W;
+            chan->send(chan, to_buf, "Enter value (0 or 1):||KBD:{\"keyboard\":[[{\"text\":\"1\"},{\"text\":\"0\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_VAL_W) {
+            char json[256];
+            snprintf(json, sizeof(json), "{\"action\":\"write\",\"pin\":\"%s\",\"val\":\"%s\"}", s_wiz_pin, cmd);
+            nc_tool t = nc_tool_hw_gpio();
+            t.execute(&t, json, reply, sizeof(reply));
+            s_wiz_state = S_WIZ_IDLE;
+            char out[1024];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            chan->send(chan, to_buf, out);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_GPIO_PIN_R) {
+            char json[256];
+            snprintf(json, sizeof(json), "{\"action\":\"read\",\"pin\":\"%s\"}", cmd);
+            nc_tool t = nc_tool_hw_gpio();
+            t.execute(&t, json, reply, sizeof(reply));
+            s_wiz_state = S_WIZ_IDLE;
+            char out[1024];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            chan->send(chan, to_buf, out);
+            return true;
+        }
+    }
+
+    if (cmd[0] != '/') return false;
 
     if (strcmp(cmd, "/status") == 0) {
         snprintf(reply, sizeof(reply),
@@ -137,8 +201,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             "/restart - Force binary reboot\n"
             "/map_gpio <name> <pin> - Map alias\n"
             "/unmap_gpio <name>     - Remove alias\n"
-            "/export_gpio <pin>     - Export GPIO\n"
-            "/unexport_gpio <pin>   - Unexport GPIO\n"
+            "/gpio                  - Interactive GPIO Menu\n"
             "/set_gpio <pin> <val>  - Write GPIO\n"
             "/read_gpio <pin>       - Read GPIO\n"
             "/i2c_scan <bus>       - Scan I2C bus\n"
@@ -165,6 +228,9 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         } else {
             snprintf(reply, sizeof(reply), "error: alias '%s' not found", name);
         }
+    } else if (strcmp(cmd, "/gpio") == 0) {
+        s_wiz_state = S_WIZ_GPIO_OP;
+        snprintf(reply, sizeof(reply), "Choose GPIO operation:||KBD:{\"keyboard\":[[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
     } else if (strncmp(cmd, "/export_gpio ", 13) == 0) {
         char pin[32] = {0};
         sscanf(cmd + 13, "%31s", pin);
