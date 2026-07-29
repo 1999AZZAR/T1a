@@ -21,6 +21,7 @@ void nc_config_defaults(nc_config *cfg) {
     /* Provider */
     nc_strlcpy(cfg->default_provider, "opencode", sizeof(cfg->default_provider));
     nc_strlcpy(cfg->default_model, "deepseek-v4-flash-free", sizeof(cfg->default_model));
+    nc_strlcpy(cfg->small_model, "nemotron-3-ultra-free", sizeof(cfg->small_model));
     nc_strlcpy(cfg->api_url, "https://opencode.ai/zen/v1", sizeof(cfg->api_url));
     cfg->default_temperature = 0.5;
 
@@ -31,7 +32,7 @@ void nc_config_defaults(nc_config *cfg) {
     cfg->gateway_allow_public_bind = false;
 
     /* Memory */
-    nc_strlcpy(cfg->memory_backend, "flat", sizeof(cfg->memory_backend));
+    nc_strlcpy(cfg->memory_backend, "guardian", sizeof(cfg->memory_backend));
     cfg->memory_auto_save = true;
 
     /* Autonomy */
@@ -58,11 +59,12 @@ void nc_config_defaults(nc_config *cfg) {
     cfg->cost_daily_limit_usd = 50.0;
     cfg->cost_monthly_limit_usd = 500.0;
 
-    /* Fallback (defaults empty) */
-    cfg->fallback_provider[0] = '\0';
-    cfg->fallback_model[0] = '\0';
+    /* Cross-provider fallback remains free and works anonymously. */
+    nc_strlcpy(cfg->fallback_provider, "kilo", sizeof(cfg->fallback_provider));
+    nc_strlcpy(cfg->fallback_model, "openrouter/free", sizeof(cfg->fallback_model));
     cfg->fallback_api_key[0] = '\0';
-    cfg->fallback_api_url[0] = '\0';
+    nc_strlcpy(cfg->fallback_api_url, "https://api.kilo.ai/api/gateway",
+        sizeof(cfg->fallback_api_url));
 }
 
 /* Helper: copy nc_str to fixed buffer */
@@ -103,8 +105,16 @@ bool nc_config_load(nc_config *cfg) {
         str_to_buf(cfg->default_provider, sizeof(cfg->default_provider), nc_json_str(v, "openrouter"));
     if ((v = nc_json_get(root, "default_model")))
         str_to_buf(cfg->default_model, sizeof(cfg->default_model), nc_json_str(v, ""));
+    if ((v = nc_json_get(root, "small_model")))
+        str_to_buf(cfg->small_model, sizeof(cfg->small_model), nc_json_str(v, ""));
     if ((v = nc_json_get(root, "default_temperature")))
         cfg->default_temperature = nc_json_num(v, 0.7);
+    if ((v = nc_json_get(root, "telegram_token")))
+        str_to_buf(cfg->telegram_token, sizeof(cfg->telegram_token), nc_json_str(v, ""));
+    if ((v = nc_json_get(root, "discord_token")))
+        str_to_buf(cfg->discord_token, sizeof(cfg->discord_token), nc_json_str(v, ""));
+    if ((v = nc_json_get(root, "slack_token")))
+        str_to_buf(cfg->slack_token, sizeof(cfg->slack_token), nc_json_str(v, ""));
 
     /* Fallback fields */
     if ((v = nc_json_get(root, "fallback_provider")))
@@ -220,6 +230,7 @@ bool nc_config_save(const nc_config *cfg) {
         nc_jw_str(&w, "api_key", cfg->api_key);
     nc_jw_str(&w, "default_provider", cfg->default_provider);
     nc_jw_str(&w, "default_model", cfg->default_model);
+    nc_jw_str(&w, "small_model", cfg->small_model);
     nc_jw_num(&w, "default_temperature", cfg->default_temperature);
 
     if (cfg->fallback_provider[0]) {
@@ -301,6 +312,8 @@ void nc_config_apply_env(nc_config *cfg) {
         nc_strlcpy(cfg->default_provider, v, sizeof(cfg->default_provider));
     if ((v = getenv("NOCLAW_MODEL")))
         nc_strlcpy(cfg->default_model, v, sizeof(cfg->default_model));
+    if ((v = getenv("NOCLAW_SMALL_MODEL")))
+        nc_strlcpy(cfg->small_model, v, sizeof(cfg->small_model));
     if ((v = getenv("NOCLAW_TEMPERATURE"))) {
         char *endp;
         double t = strtod(v, &endp);
@@ -316,8 +329,16 @@ void nc_config_apply_env(nc_config *cfg) {
         nc_strlcpy(cfg->workspace_dir, v, sizeof(cfg->workspace_dir));
     if ((v = getenv("NOCLAW_BASE_URL")))
         nc_strlcpy(cfg->api_url, v, sizeof(cfg->api_url));
+    if ((v = getenv("NOCLAW_TELEGRAM_TOKEN")))
+        nc_strlcpy(cfg->telegram_token, v, sizeof(cfg->telegram_token));
+    if ((v = getenv("NOCLAW_DISCORD_TOKEN")))
+        nc_strlcpy(cfg->discord_token, v, sizeof(cfg->discord_token));
+    if ((v = getenv("NOCLAW_SLACK_TOKEN")))
+        nc_strlcpy(cfg->slack_token, v, sizeof(cfg->slack_token));
 
     /* Fallback Env */
+    if ((v = getenv("KILO_API_KEY")) && strcmp(cfg->fallback_provider, "kilo") == 0)
+        nc_strlcpy(cfg->fallback_api_key, v, sizeof(cfg->fallback_api_key));
     if ((v = getenv("NOCLAW_FALLBACK_PROVIDER")))
         nc_strlcpy(cfg->fallback_provider, v, sizeof(cfg->fallback_provider));
     if ((v = getenv("NOCLAW_FALLBACK_MODEL")))
@@ -335,14 +356,18 @@ void nc_test_config(void) {
     nc_config cfg;
     nc_config_defaults(&cfg);
 
-    NC_ASSERT(strcmp(cfg.default_provider, "openrouter") == 0, "config default provider");
+    NC_ASSERT(strcmp(cfg.default_provider, "opencode") == 0, "config default provider");
+    NC_ASSERT(strcmp(cfg.default_model, "deepseek-v4-flash-free") == 0, "config default main model");
+    NC_ASSERT(strcmp(cfg.small_model, "nemotron-3-ultra-free") == 0, "config default small model");
     NC_ASSERT(cfg.default_temperature == 0.5, "config default temp");
     NC_ASSERT(cfg.gateway_port == 8888, "config default port");
     NC_ASSERT(cfg.gateway_require_pairing == true, "config default pairing");
     NC_ASSERT(cfg.gateway_allow_public_bind == false, "config default no public bind");
     NC_ASSERT(cfg.workspace_only == true, "config default workspace_only");
     NC_ASSERT(cfg.secrets_encrypt == true, "config default secrets encrypt");
-    NC_ASSERT(strcmp(cfg.memory_backend, "flat") == 0, "config default memory backend");
+    NC_ASSERT(strcmp(cfg.memory_backend, "guardian") == 0, "config default memory backend");
     NC_ASSERT(strcmp(cfg.runtime_kind, "daemon") == 0, "config default runtime");
+    NC_ASSERT(strcmp(cfg.fallback_provider, "kilo") == 0, "config default fallback provider");
+    NC_ASSERT(strcmp(cfg.fallback_model, "openrouter/free") == 0, "config default fallback model");
 }
 #endif

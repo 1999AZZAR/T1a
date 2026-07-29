@@ -361,22 +361,22 @@ static bool load_system_cas(void) {
     g_tas.items = (br_x509_trust_anchor *)calloc(g_tas.cap, sizeof(br_x509_trust_anchor));
     g_tas.pool_cap = 256 * 1024;
     g_tas.pool = (unsigned char *)malloc(g_tas.pool_cap);
-    if (!g_tas.items || !g_tas.pool) { 
+    if (!g_tas.items || !g_tas.pool) {
         free(pem);
         if (g_tas.items) free(g_tas.items);
         if (g_tas.pool) free(g_tas.pool);
         g_tas.items = NULL;
         g_tas.pool = NULL;
-        return false; 
+        return false;
     }
 
     /* DER accumulation buffer */
     der_buf der = { .buf = (unsigned char *)malloc(8192), .len = 0, .cap = 8192 };
-    if (!der.buf) { 
+    if (!der.buf) {
         free(pem);
         free(g_tas.items); g_tas.items = NULL;
         free(g_tas.pool); g_tas.pool = NULL;
-        return false; 
+        return false;
     }
 
     br_pem_decoder_context pc;
@@ -580,7 +580,7 @@ void nc_http_response_free(nc_http_response *resp) {
 
 /* ── Parse HTTP response (status + headers + body) ────────────── */
 
-static bool read_response(tls_conn *c, nc_http_response *resp) {
+static bool read_response(tls_conn *c, nc_http_response *resp, nc_http_stream_cb on_chunk, void *user_data) {
     /* Read into a raw buffer, then split header/body */
     char *raw = NULL;
     size_t raw_len = 0, raw_cap = 16384;
@@ -651,58 +651,84 @@ static bool read_response(tls_conn *c, nc_http_response *resp) {
     size_t body_so_far = raw_len - (size_t)(body_start - raw);
 
     if (chunked) {
-        /* Decode chunked transfer encoding */
-        /* Collect all remaining data first */
+        /* Progressive chunked decoder */
+        size_t off = (size_t)(body_start - raw);
         while (1) {
-            if (raw_len + 4096 > raw_cap) {
-                raw_cap *= 2;
-                char *nb = (char *)realloc(raw, raw_cap);
-                if (!nb) break;
-                raw = nb;
-                /* Recalculate body_start after realloc */
-                header_end = strstr(raw, "\r\n\r\n");
-                body_start = header_end + 4;
-                body_so_far = raw_len - (size_t)(body_start - raw);
+            /* Find CRLF after chunk size */
+            char *crlf = strstr(raw + off, "\r\n");
+            while (!crlf) {
+                if (raw_len + 4096 > raw_cap) {
+                    raw_cap *= 2;
+                    char *nb = (char *)realloc(raw, raw_cap);
+                    if (!nb) goto end_chunked;
+                    raw = nb;
+                }
+                ssize_t n = tls_read(c, raw + raw_len, 4096);
+                if (n <= 0) goto end_chunked;
+                raw_len += (size_t)n;
+                raw[raw_len] = '\0';
+                crlf = strstr(raw + off, "\r\n");
             }
-            ssize_t n = tls_read(c, raw + raw_len, 4096);
-            if (n <= 0) break;
-            raw_len += (size_t)n;
-            raw[raw_len] = '\0';
 
-            /* Check for final chunk (0\r\n\r\n) */
-            {
-                size_t search_start = (raw_len > (size_t)n + 10)
-                    ? raw_len - (size_t)n - 10 : 0;
-                if (strstr(raw + search_start, "\r\n0\r\n\r\n"))
-                    break;
+            long chunk_size = strtol(raw + off, NULL, 16);
+            if (chunk_size == 0) break;
+
+            off = (size_t)(crlf - raw) + 2;
+
+            size_t rem = (size_t)chunk_size;
+            while (rem > 0) {
+                size_t avail = raw_len - off;
+                if (avail == 0) {
+                    /* Read more */
+                    if (off > 1024) {
+                        memmove(raw, raw + off, raw_len - off);
+                        raw_len -= off;
+                        off = 0;
+                        raw[raw_len] = '\0';
+                    }
+                    if (raw_len + 4096 > raw_cap) {
+                        raw_cap *= 2;
+                        char *nb = (char *)realloc(raw, raw_cap);
+                        if (!nb) goto end_chunked;
+                        raw = nb;
+                    }
+                    ssize_t n = tls_read(c, raw + raw_len, 4096);
+                    if (n <= 0) goto end_chunked;
+                    raw_len += (size_t)n;
+                    raw[raw_len] = '\0';
+                    avail = raw_len - off;
+                }
+                size_t take = avail < rem ? avail : rem;
+                if (on_chunk) {
+                    if (!on_chunk(user_data, raw + off, take)) goto end_chunked;
+                }
+                resp_append(resp, raw + off, take);
+                off += take;
+                rem -= take;
             }
+
+            /* Read CRLF at end of chunk */
+            while (raw_len - off < 2) {
+                if (off > 1024) {
+                    memmove(raw, raw + off, raw_len - off);
+                    raw_len -= off;
+                    off = 0;
+                    raw[raw_len] = '\0';
+                }
+                if (raw_len + 4096 > raw_cap) {
+                    raw_cap *= 2;
+                    char *nb = (char *)realloc(raw, raw_cap);
+                    if (!nb) goto end_chunked;
+                    raw = nb;
+                }
+                ssize_t n = tls_read(c, raw + raw_len, 4096);
+                if (n <= 0) goto end_chunked;
+                raw_len += (size_t)n;
+                raw[raw_len] = '\0';
+            }
+            off += 2; /* Skip CRLF */
         }
-
-        /* Re-locate body_start after potential reallocs */
-        header_end = strstr(raw, "\r\n\r\n");
-        body_start = header_end + 4;
-        body_so_far = raw_len - (size_t)(body_start - raw);
-
-        /* Decode chunks */
-        const char *p = body_start;
-        const char *end = raw + raw_len;
-        while (p < end) {
-            /* Read chunk size (hex) */
-            long chunk_size = strtol(p, NULL, 16);
-            if (chunk_size <= 0) break;
-
-            /* Skip to chunk data (after \r\n) */
-            const char *data = strstr(p, "\r\n");
-            if (!data) break;
-            data += 2;
-
-            if (data + chunk_size <= end)
-                resp_append(resp, data, (size_t)chunk_size);
-
-            p = data + chunk_size;
-            if (p + 2 <= end && p[0] == '\r' && p[1] == '\n')
-                p += 2;
-        }
+end_chunked:;
     } else if (has_content_length) {
         /* Read remaining body by Content-Length */
         resp_append(resp, body_start, body_so_far);
@@ -805,7 +831,7 @@ bool nc_http_post(const char *url, const char *body, size_t body_len,
     }
 
     /* Read response */
-    bool ok = read_response(&conn, resp);
+    bool ok = read_response(&conn, resp, NULL, NULL);
 
     tls_close(&conn);
 
@@ -871,7 +897,7 @@ bool nc_http_get(const char *url, const char **headers, int header_count,
         return false;
     }
 
-    bool ok = read_response(&conn, resp);
+    bool ok = read_response(&conn, resp, NULL, NULL);
     tls_close(&conn);
     return ok;
 }
@@ -930,3 +956,69 @@ void nc_test_http(void) {
     NC_ASSERT(resp.body == NULL, "resp_free nulls body");
 }
 #endif
+
+bool nc_http_post_stream(const char *url, const char *body, size_t body_len,
+                         const char **headers, int header_count,
+                         nc_http_stream_cb on_chunk, void *user_data,
+                         nc_http_response *resp) {
+    resp_init(resp);
+
+    parsed_url pu;
+    if (!parse_url(url, &pu)) {
+        nc_log(NC_LOG_ERROR, "Invalid URL: %s", url);
+        return false;
+    }
+
+    int fd = tcp_connect(pu.host, pu.port);
+    if (fd < 0) return false;
+
+    tls_conn conn;
+    memset(&conn, 0, sizeof(conn));
+    conn.fd = fd;
+    conn.is_tls = pu.is_https;
+
+    if (!tls_connect(&conn, pu.host)) {
+        close(fd);
+        return false;
+    }
+
+    char req_header[4096];
+    int off = snprintf(req_header, sizeof(req_header),
+        "POST %s HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "Content-Length: %zu\r\n"
+        "Connection: close\r\n",
+        pu.path, pu.host, body_len);
+
+    for (int i = 0; i < header_count; i++) {
+        if ((size_t)off >= sizeof(req_header)) break;
+        off += snprintf(req_header + off, sizeof(req_header) - (size_t)off,
+            "%s\r\n", headers[i]);
+    }
+    if ((size_t)off < sizeof(req_header))
+        off += snprintf(req_header + off, sizeof(req_header) - (size_t)off, "\r\n");
+
+    if ((size_t)off >= sizeof(req_header)) {
+        nc_log(NC_LOG_ERROR, "HTTP headers too large");
+        tls_close(&conn);
+        return false;
+    }
+    size_t req_len = (size_t)off;
+
+    if (!tls_write_all(&conn, req_header, req_len)) {
+        tls_close(&conn);
+        return false;
+    }
+
+    if (body && body_len > 0) {
+        if (!tls_write_all(&conn, body, body_len)) {
+            tls_close(&conn);
+            return false;
+        }
+    }
+
+    tls_flush(&conn);
+    bool ok = read_response(&conn, resp, on_chunk, user_data);
+    tls_close(&conn);
+    return ok;
+}

@@ -1,5 +1,6 @@
 obj/
 noclaw
+noclaw_test
 *.log
 .env
 *.o
@@ -14,3 +15,7 @@ release-*/
 *.tar.bz2
 *.tar.xz
 *.db
+
+# Project Guardian
+memory.db
+memory.db-journal

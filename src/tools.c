@@ -126,7 +126,7 @@ static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_
     char final_cmd[8192];
     char tmp_file[128];
     snprintf(tmp_file, sizeof(tmp_file), "/tmp/nc_cmd_%d_%d.sh", getpid(), rand() % 1000000);
-    
+
     FILE *script_fp = fopen(tmp_file, "w");
     if (script_fp) {
         fprintf(script_fp, "#!/bin/bash\n%s\n", command);
@@ -1144,6 +1144,88 @@ nc_tool nc_tool_hash(const nc_config *cfg) {
         },
         .ctx = (void *)cfg,
         .execute = hash_execute,
+        .free = NULL,
+    };
+}
+
+/* ── Core Memory Tools ────────────────────────────────────────── */
+
+static bool core_memory_append_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
+    const nc_config *cfg = (const nc_config *)self->ctx;
+    char content[2048];
+    const char *keys[] = {"content"};
+    char *outs[] = {content};
+    const size_t caps[] = {sizeof(content)};
+
+    if (!extract_json_strings(args_json, keys, outs, caps, 1)) {
+        snprintf(out, out_cap, "error: invalid arguments");
+        return true;
+    }
+
+    char path[PATH_MAX];
+    nc_path_join(path, sizeof(path), cfg->workspace_dir, "core_memory.txt");
+
+    FILE *f = fopen(path, "a");
+    if (!f) {
+        snprintf(out, out_cap, "error: could not open core_memory.txt");
+        return true;
+    }
+    fprintf(f, "\n%s\n", content);
+    fclose(f);
+
+    snprintf(out, out_cap, "success: appended to core_memory.txt");
+    return true;
+}
+
+nc_tool nc_tool_core_memory_append(const nc_config *cfg) {
+    return (nc_tool){
+        .def = {
+            .name = "core_memory_append",
+            .description = "Appends a permanent fact, preference, or goal to your core memory (injected into every prompt). Use this to remember things forever.",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"}},\"required\":[\"content\"]}",
+        },
+        .ctx = (void *)cfg,
+        .execute = core_memory_append_execute,
+        .free = NULL,
+    };
+}
+
+static bool core_memory_replace_execute(nc_tool *self, const char *args_json, char *out, size_t out_cap) {
+    const nc_config *cfg = (const nc_config *)self->ctx;
+    char content[4096];
+    const char *keys[] = {"content"};
+    char *outs[] = {content};
+    const size_t caps[] = {sizeof(content)};
+
+    if (!extract_json_strings(args_json, keys, outs, caps, 1)) {
+        snprintf(out, out_cap, "error: invalid arguments");
+        return true;
+    }
+
+    char path[PATH_MAX];
+    nc_path_join(path, sizeof(path), cfg->workspace_dir, "core_memory.txt");
+
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        snprintf(out, out_cap, "error: could not open core_memory.txt");
+        return true;
+    }
+    fprintf(f, "%s\n", content);
+    fclose(f);
+
+    snprintf(out, out_cap, "success: replaced core_memory.txt");
+    return true;
+}
+
+nc_tool nc_tool_core_memory_replace(const nc_config *cfg) {
+    return (nc_tool){
+        .def = {
+            .name = "core_memory_replace",
+            .description = "Completely replaces the contents of your core memory. Use with caution. Prefer append unless cleaning up.",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"}},\"required\":[\"content\"]}",
+        },
+        .ctx = (void *)cfg,
+        .execute = core_memory_replace_execute,
         .free = NULL,
     };
 }

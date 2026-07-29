@@ -97,7 +97,11 @@ cat > ~/.noclaw/config.json << EOF
     "api_url": "https://opencode.ai/zen/v1",
     "default_provider": "opencode",
     "default_model": "deepseek-v4-flash-free",
+    "small_model": "nemotron-3-ultra-free",
     "default_temperature": 0.5,
+    "fallback_provider": "kilo",
+    "fallback_model": "openrouter/free",
+    "fallback_api_url": "https://api.kilo.ai/api/gateway",
     "telegram_token": "${TELEGRAM_TOKEN}",
     "memory": {
         "backend": "guardian",
@@ -111,12 +115,18 @@ cat > ~/.noclaw/config.json << EOF
 }
 EOF
 
-# Tavily key is embedded in binary (src/mcp_builtin.c)
-# Set env for override
-if [ "$TAVILY_KEY" != "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" ]; then
-    echo "export TAVILY_API_KEY=${TAVILY_KEY}" >> ~/.noclaw/env
-    echo -e "  ${DIM}Tavily key stored in ~/.noclaw/env${NC}"
+# Keep API keys out of the binary and load them through the launcher.
+ENV_FILE="$HOME/.noclaw/env"
+ENV_TMP="$ENV_FILE.tmp"
+umask 077
+if [ -f "$ENV_FILE" ]; then
+    grep -v '^export TAVILY_API_KEY=' "$ENV_FILE" > "$ENV_TMP" || true
+else
+    : > "$ENV_TMP"
 fi
+printf 'export TAVILY_API_KEY=%q\n' "$TAVILY_KEY" >> "$ENV_TMP"
+mv "$ENV_TMP" "$ENV_FILE"
+echo -e "  ${DIM}Tavily key stored in ~/.noclaw/env${NC}"
 
 echo -e "  ${GREEN}✓${NC} ~/.noclaw/config.json created"
 echo ""
@@ -126,6 +136,8 @@ echo ""
 cat > run_t1a.sh << 'LAUNCHER'
 #!/bin/bash
 # T1a Launcher — start agent in Telegram mode with auto-restart
+set -u
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
@@ -184,7 +196,8 @@ echo "  ║     ${GREEN}Setup Complete${NC}                        ║"
 echo "  ╠══════════════════════════════════════════╣"
 echo -e "  ║  Binary:    ${BOLD}${BINARY_SIZE}${NC}                        ║"
 echo -e "  ║  Provider:  ${BOLD}OpenCode (free)${NC}                 ║"
-echo -e "  ║  Model:     ${BOLD}deepseek-v4-flash-free${NC}          ║"
+echo -e "  ║  Main:      ${BOLD}deepseek-v4-flash-free${NC}          ║"
+echo -e "  ║  Small:     ${BOLD}nemotron-3-ultra-free${NC}           ║"
 echo -e "  ║  Memory:    ${BOLD}Guardian (persistent)${NC}           ║"
 echo "  ╠══════════════════════════════════════════╣"
 echo -e "  ║  ${DIM}Run now:${NC}                                    ║"

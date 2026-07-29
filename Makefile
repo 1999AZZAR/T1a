@@ -1,7 +1,7 @@
 CC = cc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-parameter
+CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-parameter -MMD -MP
 INCLUDES = -Isrc -I/usr/local/include
-LDFLAGS = -L/usr/local/lib -lbearssl
+LDFLAGS = -L/usr/local/lib -lbearssl -lpthread
 
 # Optimization: small binary, fast code
 RELEASE_FLAGS = -Os -DNDEBUG -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables
@@ -20,6 +20,7 @@ TARGET = noclaw
 TEST_FLAGS = -g -O0 -DNC_TEST -DNC_TEST_MAIN
 TEST_OBJ_DIR = obj_test
 TEST_OBJS = $(SRCS:$(SRC_DIR)/%.c=$(TEST_OBJ_DIR)/%.o)
+DEPS = $(OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
 .PHONY: all clean debug release test
 
@@ -56,3 +57,5 @@ $(TARGET)_test: $(TEST_OBJS)
 
 clean:
 	rm -rf $(OBJ_DIR) $(TEST_OBJ_DIR) $(TARGET) $(TARGET)_test
+
+-include $(DEPS)

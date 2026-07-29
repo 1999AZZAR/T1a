@@ -27,6 +27,8 @@ int main(void) {
     nc_test_config();
     nc_test_memory();
     nc_test_http();
+    nc_test_builtin_tools();
+    nc_test_agent_context();
 
     printf("\n═════════════════\n");
     printf("Results: %d passed, %d failed\n", nc_test_pass, nc_test_fail);
@@ -58,8 +60,8 @@ static void setup_signals(void) {
     sa.sa_handler = nc_signal_handler;
     sigemptyset(&sa.sa_mask);
     /* Restart syscalls if possible, though we exit anyway */
-    sa.sa_flags = SA_RESTART; 
-    
+    sa.sa_flags = SA_RESTART;
+
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 }

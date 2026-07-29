@@ -20,9 +20,8 @@
 /* ── Constants ────────────────────────────────────────────────── */
 
 #define GM_MAX_ENTITIES  256
-#define GM_MAX_OBS       16
-#define GM_FIELD_LEN     512
 #define GM_PATH_LEN      1024
+#define GM_JSON_LEN      ((GM_MAX_OBS + 2) * GM_FIELD_LEN * 2 + 256)
 
 /* ── Context (entity struct from nc.h) ───────────────────────── */
 
@@ -122,7 +121,7 @@ static void gm_load(gm_ctx *ctx) {
 
         /* Parse JSON line: {"n":"name","t":"type","o":["obs1","obs2"],"c":ts} */
         nc_arena a;
-        nc_arena_init(&a, 2048);
+        nc_arena_init(&a, strlen(line) * 2 + 1024);
         nc_json *root = nc_json_parse(&a, line, strlen(line));
         if (root && root->type == NC_JSON_OBJECT) {
             gm_entity *e = &ctx->entities[ctx->entity_count++];
@@ -162,13 +161,13 @@ static void gm_load(gm_ctx *ctx) {
 /* ── Save to file (full rewrite) ─────────────────────────────── */
 
 static void gm_save(gm_ctx *ctx) {
-    size_t cap = (size_t)ctx->entity_count * 1024 + 256;
+    size_t cap = (size_t)ctx->entity_count * GM_JSON_LEN + 1;
     char *buf = (char *)malloc(cap);
     if (!buf) return;
 
     size_t off = 0;
     for (int i = 0; i < ctx->entity_count; i++) {
-        char entity_json[1024];
+        char entity_json[GM_JSON_LEN];
         gm_entity_to_json(&ctx->entities[i], entity_json, sizeof(entity_json));
         int n = snprintf(buf + off, cap - off, "%s\n", entity_json);
         if (n > 0) off += (size_t)n;
@@ -176,30 +175,6 @@ static void gm_save(gm_ctx *ctx) {
 
     gm_write_file(ctx->path, buf, off);
     free(buf);
-}
-
-/* ── Prune by age: remove entities older than N days ──────────── */
-
-static void gm_prune(gm_ctx *ctx, int max_days) {
-    time_t now = time(NULL);
-    long cutoff = (long)(now - (time_t)max_days * 86400);
-    int pruned = 0;
-
-    for (int i = 0; i < ctx->entity_count; ) {
-        if (ctx->entities[i].created_at > 0 && ctx->entities[i].created_at < cutoff) {
-            for (int j = i; j < ctx->entity_count - 1; j++)
-                ctx->entities[j] = ctx->entities[j + 1];
-            ctx->entity_count--;
-            pruned++;
-        } else {
-            i++;
-        }
-    }
-
-    if (pruned > 0) {
-        nc_log(NC_LOG_INFO, "Guardian: pruned %d old entities", pruned);
-        gm_save(ctx);
-    }
 }
 
 /* ── CRUD Operations ─────────────────────────────────────────── */
@@ -405,3 +380,28 @@ nc_memory nc_memory_noop(void) {
         .free   = noop_free,
     };
 }
+
+#ifdef NC_TEST
+void nc_test_memory(void) {
+    char path[] = "/tmp/noclaw_guardian_test_XXXXXX";
+    int fd = mkstemp(path);
+    NC_ASSERT(fd >= 0, "create Guardian test file");
+    if (fd >= 0) close(fd);
+
+    nc_memory mem = nc_memory_guardian(path);
+    NC_ASSERT(strcmp(mem.backend_name, "guardian") == 0, "Guardian backend name");
+    NC_ASSERT(mem.store(&mem, "project", "persistent observation"), "Guardian store");
+
+    char out[4096];
+    NC_ASSERT(mem.recall(&mem, "persistent", out, sizeof(out)), "Guardian recall");
+    NC_ASSERT(strstr(out, "persistent observation") != NULL, "Guardian recall content");
+    mem.free(&mem);
+
+    mem = nc_memory_guardian(path);
+    NC_ASSERT(mem.recall(&mem, "persistent", out, sizeof(out)), "Guardian survives reopen");
+    NC_ASSERT(mem.forget(&mem, "project"), "Guardian forget");
+    NC_ASSERT(!mem.recall(&mem, "persistent", out, sizeof(out)), "Guardian forget persisted");
+    mem.free(&mem);
+    unlink(path);
+}
+#endif

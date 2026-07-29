@@ -3,7 +3,7 @@
  *
  * Replaces:
  *   - @modelcontextprotocol/server-sequential-thinking → reasoning
- *   - mcp-remote tavily → tavily_search  
+ *   - mcp-remote tavily → tavily_search
  *   - @modelcontextprotocol/server-memory → guardian_memory
  *
  * All pure C, BearSSL only. None need Node.js.
@@ -75,7 +75,7 @@ static bool reasoning_execute(nc_tool *self, const char *args_json, char *out, s
         }
     }
 
-    if (!next || !more) {
+    if (!next) {
         int off = snprintf(out, out_cap, "{\"done\":true,\"n\":%d,\"thoughts\":[", g_thought_count);
         for (int i = 0; i < g_thought_count && (size_t)off < out_cap - 128; i++) {
             char esc[THOUGHT_LEN*2];
@@ -128,8 +128,33 @@ nc_tool nc_tool_reasoning(void) {
 
 #define TAVILY_URL "https://api.tavily.com/search"
 
+static bool json_string_copy(char *out, size_t cap, const char *src, size_t len) {
+    size_t off = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"' || c == '\\') {
+            if (off + 2 >= cap) return false;
+            out[off++] = '\\';
+            out[off++] = (char)c;
+        } else if (c == '\n' || c == '\r' || c == '\t') {
+            if (off + 2 >= cap) return false;
+            out[off++] = '\\';
+            out[off++] = c == '\n' ? 'n' : c == '\r' ? 'r' : 't';
+        } else if (c >= 0x20) {
+            if (off + 1 >= cap) return false;
+            out[off++] = (char)c;
+        }
+    }
+    out[off] = '\0';
+    return true;
+}
+
 static bool tavily_execute(nc_tool *self, const char *json, char *out, size_t cap) {
-    (void)self;
+    const char *api_key = self ? (const char *)self->ctx : NULL;
+    if (!api_key || !api_key[0]) {
+        nc_strlcpy(out, "error: TAVILY_API_KEY not set. Use wikipedia_search for general knowledge.", cap);
+        return true;
+    }
     nc_arena a;
     nc_arena_init(&a, strlen(json)*2+2048);
     nc_json *root = nc_json_parse(&a, json, strlen(json));
@@ -137,13 +162,31 @@ static bool tavily_execute(nc_tool *self, const char *json, char *out, size_t ca
 
     nc_str q = nc_json_str(nc_json_get(root, "query"), "");
     int max = (int)nc_json_num(nc_json_get(root, "max_results"), 5);
-    if (max < 1) max = 1; if (max > 10) max = 10;
+    if (max < 1) max = 1;
+    if (max > 10) max = 10;
     if (q.len == 0) { nc_strlcpy(out, "error: missing query", cap); nc_arena_free(&a); return false; }
 
-    char *body = malloc(q.len + 256);
-    int blen = snprintf(body, q.len+256,
-        "{\"api_key\":\"***\",\"query\":\"%.*s\",\"max_results\":%d,\"include_answer\":true}",
-        (int)q.len, q.ptr, max);
+    size_t escaped_cap = q.len * 2 + 1;
+    size_t key_cap = strlen(api_key) * 2 + 1;
+    char *escaped_query = malloc(escaped_cap);
+    char *escaped_key = malloc(key_cap);
+    if (!escaped_query || !escaped_key ||
+        !json_string_copy(escaped_query, escaped_cap, q.ptr, q.len) ||
+        !json_string_copy(escaped_key, key_cap, api_key, strlen(api_key))) {
+        free(escaped_query);
+        free(escaped_key);
+        nc_arena_free(&a);
+        return false;
+    }
+
+    size_t body_cap = strlen(escaped_query) + strlen(escaped_key) + 256;
+    char *body = malloc(body_cap);
+    if (!body) { free(escaped_query); free(escaped_key); nc_arena_free(&a); return false; }
+    int blen = snprintf(body, body_cap,
+        "{\"api_key\":\"%s\",\"query\":\"%s\",\"max_results\":%d,\"include_answer\":true}",
+        escaped_key, escaped_query, max);
+    free(escaped_query);
+    free(escaped_key);
 
     const char *hdr[] = {"Content-Type: application/json"};
     nc_http_response resp = {0};
@@ -170,7 +213,8 @@ static bool tavily_execute(nc_tool *self, const char *json, char *out, size_t ca
                     nc_str tl = nc_json_str(nc_json_get(it,"title"),"");
                     nc_str u = nc_json_str(nc_json_get(it,"url"),"");
                     nc_str c = nc_json_str(nc_json_get(it,"content"),"");
-                    off += snprintf(out+off, cap-(size_t)off, "%d. %.*s\n   %.*s\n\n", i+1, (int)tl.len,tl.ptr, (int)c.len,c.ptr);
+                    off += snprintf(out+off, cap-(size_t)off, "%d. %.*s\n   %.*s\n   %.*s\n\n",
+                        i+1, (int)tl.len, tl.ptr, (int)u.len, u.ptr, (int)c.len, c.ptr);
                 }
             }
             if (off == 0) nc_strlcpy(out, "No results.", cap);
@@ -183,7 +227,7 @@ static bool tavily_execute(nc_tool *self, const char *json, char *out, size_t ca
     return ok;
 }
 
-nc_tool nc_tool_tavily_search(void) {
+nc_tool nc_tool_tavily_search(const char *api_key) {
     return (nc_tool){
         .def = {
             .name = "tavily_search",
@@ -197,7 +241,7 @@ nc_tool nc_tool_tavily_search(void) {
                 "\"required\":[\"query\"]"
             "}",
         },
-        .ctx = NULL, .execute = tavily_execute, .free = NULL,
+        .ctx = (void *)api_key, .execute = tavily_execute, .free = NULL,
     };
 }
 
@@ -279,8 +323,8 @@ static bool wiki_execute(nc_tool *self, const char *json, char *out, size_t cap)
                         wiki_strip_html(snippet.ptr, clean, sizeof(clean));
 
                         off += snprintf(out+off, cap-(size_t)off,
-                            "%d. %s\n   https://en.wikipedia.org/?curid=%d\n   %s\n\n",
-                            i+1, title.ptr, pageid, clean);
+                            "%d. %.*s\n   https://en.wikipedia.org/?curid=%d\n   %s\n\n",
+                            i+1, (int)title.len, title.ptr, pageid, clean);
                     }
                 }
                 if (off == 0) nc_strlcpy(out, "No Wikipedia results found.", cap);
@@ -318,28 +362,12 @@ nc_tool nc_tool_wikipedia_search(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- *  GUARDIAN MEMORY — pure C, self-contained, no external deps
- *
- *  Entity-relation graph with static arrays and keyword search.
- *  Self-contained like sequentialthinking — no dependency on memory.c.
+ *  GUARDIAN MEMORY — shared persistent backend from memory.c
  * ══════════════════════════════════════════════════════════════════ */
 
-#define G_ENTS 256
-#define G_OBS  16
-#define G_LEN  512
-
-typedef struct { char n[G_LEN], t[G_LEN], o[G_OBS][G_LEN]; int oc; } g_ent;
-static g_ent g_ents[G_ENTS];
-static int g_ec = 0;
-
-static int g_find(const char *name) {
-    for (int i = 0; i < g_ec; i++)
-        if (strcmp(g_ents[i].n, name) == 0) return i;
-    return -1;
-}
-
 static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t cap) {
-    (void)self;
+    void *ctx = self ? self->ctx : NULL;
+    if (!ctx) { nc_strlcpy(out, "error: memory not initialized", cap); return false; }
     nc_arena a;
     nc_arena_init(&a, strlen(json)*2+4096);
     nc_json *root = nc_json_parse(&a, json, strlen(json));
@@ -353,25 +381,16 @@ static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t 
         nc_str obs  = nc_json_str(nc_json_get(root, "observation"), "");
         if (name.len == 0) { nc_strlcpy(out, "error: missing name", cap); nc_arena_free(&a); return false; }
 
-        int idx = g_find(name.ptr);
-        if (idx < 0) {
-            if (g_ec >= G_ENTS) { nc_strlcpy(out, "error: limit reached", cap); nc_arena_free(&a); return false; }
-            idx = g_ec++;
-            size_t nl = name.len < G_LEN-1 ? name.len : G_LEN-1;
-            memcpy(g_ents[idx].n, name.ptr, nl); g_ents[idx].n[nl] = '\0';
-            g_ents[idx].t[0] = '\0';
-        }
-        if (type.len > 0) {
-            size_t tl = type.len < G_LEN-1 ? type.len : G_LEN-1;
-            memcpy(g_ents[idx].t, type.ptr, tl); g_ents[idx].t[tl] = '\0';
-        }
-        if (obs.len > 0 && g_ents[idx].oc < G_OBS) {
-            size_t ol = obs.len < G_LEN-1 ? obs.len : G_LEN-1;
-            memcpy(g_ents[idx].o[g_ents[idx].oc], obs.ptr, ol);
-            g_ents[idx].o[g_ents[idx].oc][ol] = '\0';
-            g_ents[idx].oc++;
-        }
-        snprintf(out, cap, "Stored: %s (%d obs)", g_ents[idx].n, g_ents[idx].oc);
+        char nbuf[GM_FIELD_LEN], tbuf[GM_FIELD_LEN], obuf[GM_FIELD_LEN];
+        size_t nl = name.len < sizeof(nbuf)-1 ? name.len : sizeof(nbuf)-1;
+        size_t tl = type.len < sizeof(tbuf)-1 ? type.len : sizeof(tbuf)-1;
+        size_t ol = obs.len < sizeof(obuf)-1 ? obs.len : sizeof(obuf)-1;
+        memcpy(nbuf, name.ptr, nl); nbuf[nl] = '\0';
+        memcpy(tbuf, type.ptr, tl); tbuf[tl] = '\0';
+        memcpy(obuf, obs.ptr, ol); obuf[ol] = '\0';
+        bool stored = gm_store_entity(ctx, nbuf, tbuf, obuf);
+        snprintf(out, cap, stored ? "Stored: %s" : "error: store failed", nbuf);
+        if (!stored) { nc_arena_free(&a); return false; }
 
     } else if (nc_str_eql(op, "query")) {
         nc_str query = nc_json_str(nc_json_get(root, "query"), "");
@@ -379,47 +398,25 @@ static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t 
         char q[256];
         size_t ql = query.len < sizeof(q)-1 ? query.len : sizeof(q)-1;
         memcpy(q, query.ptr, ql); q[ql] = '\0';
-        for (char *p = q; *p; p++) *p = tolower((unsigned char)*p);
-
-        int off = 0;
-        for (int i = 0; i < g_ec && (size_t)off < cap-128; i++) {
-            char nl[G_LEN]; size_t nl_len = strlen(g_ents[i].n);
-            for (size_t j = 0; j < nl_len; j++) nl[j] = tolower((unsigned char)g_ents[i].n[j]);
-            nl[nl_len] = '\0';
-
-            bool match = (strstr(nl, q) != NULL);
-            if (!match)
-                for (int k = 0; k < g_ents[i].oc; k++) {
-                    char ol[G_LEN]; size_t ol_len = strlen(g_ents[i].o[k]);
-                    for (size_t j = 0; j < ol_len; j++) ol[j] = tolower((unsigned char)g_ents[i].o[k][j]);
-                    ol[ol_len] = '\0';
-                    if (strstr(ol, q)) { match = true; break; }
-                }
-
-            if (match) {
-                off += snprintf(out+off, cap-(size_t)off, "-%s (%s):\n",
-                    g_ents[i].n, g_ents[i].t[0]?g_ents[i].t:"entity");
-                for (int k = 0; k < g_ents[i].oc; k++)
-                    off += snprintf(out+off, cap-(size_t)off, " - %s\n", g_ents[i].o[k]);
-            }
-        }
-        if (off == 0) nc_strlcpy(out, "No match.", cap);
+        gm_query(ctx, q, out, cap);
 
     } else if (nc_str_eql(op, "forget")) {
         nc_str name = nc_json_str(nc_json_get(root, "name"), "");
         if (name.len == 0) { nc_strlcpy(out, "error: missing name", cap); nc_arena_free(&a); return false; }
-        int idx = g_find(name.ptr);
-        if (idx >= 0) {
-            for (int j = idx; j < g_ec-1; j++) g_ents[j] = g_ents[j+1];
-            g_ec--;
-            snprintf(out, cap, "Forgot: %s", name.ptr);
-        } else snprintf(out, cap, "Not found: %s", name.ptr);
+        char nbuf[GM_FIELD_LEN];
+        size_t nl = name.len < sizeof(nbuf)-1 ? name.len : sizeof(nbuf)-1;
+        memcpy(nbuf, name.ptr, nl); nbuf[nl] = '\0';
+        snprintf(out, cap, gm_forget_entity(ctx, nbuf) ? "Forgot: %s" : "Not found: %s", nbuf);
 
     } else if (nc_str_eql(op, "list")) {
-        int off = snprintf(out, cap, "Entities: %d\n", g_ec);
-        for (int i = 0; i < g_ec && (size_t)off < cap-128; i++)
-            off += snprintf(out+off, cap-(size_t)off, "%d. %s (%s) — %d obs\n",
-                i+1, g_ents[i].n, g_ents[i].t[0]?g_ents[i].t:"entity", g_ents[i].oc);
+        int count = gm_entity_count(ctx);
+        int off = snprintf(out, cap, "Entities: %d\n", count);
+        for (int i = 0; i < count && (size_t)off < cap-128; i++) {
+            gm_entity *e = gm_entity_at(ctx, i);
+            if (!e) break;
+            off += snprintf(out+off, cap-(size_t)off, "%d. %s (%s) - %d obs\n",
+                i+1, e->name, e->type[0] ? e->type : "entity", e->obs_count);
+        }
     } else {
         nc_str op_s = nc_json_str(nc_json_get(root, "operation"), "");
         snprintf(out, cap, "error: unknown op '%.*s'", (int)op_s.len, op_s.ptr);
@@ -429,11 +426,11 @@ static bool guardian_execute(nc_tool *self, const char *json, char *out, size_t 
     return true;
 }
 
-nc_tool nc_tool_guardian_memory(void) {
+nc_tool nc_tool_guardian_memory(void *mem_ctx) {
     return (nc_tool){
         .def = {
             .name = "guardian_memory",
-            .description = "Entity-relation memory. Ops: store (name+obs), query (keyword), forget, list.",
+            .description = "Persistent entity memory. Ops: store (name+obs), query (keyword), forget, list.",
             .parameters_json = "{"
                 "\"type\":\"object\","
                 "\"properties\":{"
@@ -446,6 +443,200 @@ nc_tool nc_tool_guardian_memory(void) {
                 "\"required\":[\"operation\"]"
             "}",
         },
-        .ctx = NULL, .execute = guardian_execute, .free = NULL,
+        .ctx = mem_ctx, .execute = guardian_execute, .free = NULL,
     };
 }
+
+
+/* ══════════════════════════════════════════════════════════════════
+ *  I2C TOOL — read/write I2C devices (sensors, actuators)
+ *
+ *  Operations:
+ *    scan          — list devices on I2C bus
+ *    read          — read register from device
+ *    write         — write register to device
+ *    mpu_read      — read MPU6050 accel/gyro/temp
+ *
+ *  Uses Linux /dev/i2c-N + ioctl. Pure C. No external deps.
+ * ══════════════════════════════════════════════════════════════════ */
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
+
+/* ── MPU6050 constants ──────────────────────────────────────── */
+#define MPU_ADDR   0x68
+#define MPU_PWR    0x6B
+#define MPU_ACCEL  0x3B  /* 14 bytes: accel(6) + temp(2) + gyro(6) */
+
+/* ── Helper: read N bytes from I2C register ──────────────────── */
+static bool i2c_read_reg(int bus, int addr, int reg, uint8_t *buf, int len) {
+    char path[32];
+    snprintf(path, sizeof(path), "/dev/i2c-%d", bus);
+    int fd = open(path, O_RDWR);
+    if (fd < 0) return false;
+    if (ioctl(fd, I2C_SLAVE, addr) < 0) { close(fd); return false; }
+    uint8_t reg_buf = (uint8_t)reg;
+    if (write(fd, &reg_buf, 1) != 1) { close(fd); return false; }
+    int n = (int)read(fd, buf, (size_t)len);
+    close(fd);
+    return n == len;
+}
+
+/* ── Helper: write byte to I2C register ─────────────────────── */
+static bool i2c_write_reg(int bus, int addr, int reg, uint8_t val) {
+    char path[32];
+    snprintf(path, sizeof(path), "/dev/i2c-%d", bus);
+    int fd = open(path, O_RDWR);
+    if (fd < 0) return false;
+    if (ioctl(fd, I2C_SLAVE, addr) < 0) { close(fd); return false; }
+    uint8_t data[2] = { (uint8_t)reg, val };
+    int n = (int)write(fd, data, 2);
+    close(fd);
+    return n == 2;
+}
+
+/* ── Tool executor ──────────────────────────────────────────── */
+static bool i2c_execute(nc_tool *self, const char *json, char *out, size_t cap) {
+    (void)self;
+    nc_arena a;
+    nc_arena_init(&a, strlen(json)*2+2048);
+    nc_json *root = nc_json_parse(&a, json, strlen(json));
+    if (!root) {
+        nc_strlcpy(out, "error: invalid args", cap);
+        nc_arena_free(&a);
+        return false;
+    }
+
+    nc_str op = nc_json_str(nc_json_get(root, "operation"), "");
+    int bus = (int)nc_json_num(nc_json_get(root, "bus"), 1);
+    int addr = (int)nc_json_num(nc_json_get(root, "address"), -1);
+    int reg = (int)nc_json_num(nc_json_get(root, "register"), -1);
+    int val = (int)nc_json_num(nc_json_get(root, "value"), 0);
+    int len = (int)nc_json_num(nc_json_get(root, "length"), 6);
+
+    if (op.len == 0) {
+        nc_strlcpy(out, "error: missing operation", cap);
+        nc_arena_free(&a);
+        return false;
+    }
+
+    if (nc_str_eql(op, "scan")) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/i2c-%d", bus);
+        int fd = open(path, O_RDWR);
+        if (fd < 0) {
+            snprintf(out, cap, "error: cannot open /dev/i2c-%d", bus);
+            nc_arena_free(&a);
+            return false;
+        }
+        int off = snprintf(out, cap, "I2C-%d scan:\n", bus);
+        for (int a = 0x03; a <= 0x77 && (size_t)off < cap-32; a++) {
+            if (ioctl(fd, I2C_SLAVE, a) == 0) {
+                off += snprintf(out+off, cap-(size_t)off, "  0x%02X\n", a);
+            }
+        }
+        if (off < 20) off += snprintf(out+off, cap-(size_t)off, "  (none found)\n");
+        close(fd);
+
+    } else if (nc_str_eql(op, "write")) {
+        if (addr < 0 || reg < 0) {
+            nc_strlcpy(out, "error: need address + register", cap);
+            nc_arena_free(&a);
+            return false;
+        }
+        bool ok = i2c_write_reg(bus, addr, reg, (uint8_t)val);
+        snprintf(out, cap, ok ? "Wrote 0x%02X → 0x%02X[0x%02X]" : "error: write failed",
+                 (uint8_t)val, addr, reg);
+
+    } else if (nc_str_eql(op, "read")) {
+        if (addr < 0 || reg < 0) {
+            nc_strlcpy(out, "error: need address + register", cap);
+            nc_arena_free(&a);
+            return false;
+        }
+        uint8_t buf[32];
+        if (len > 32) len = 32;
+        if (i2c_read_reg(bus, addr, reg, buf, len)) {
+            int off = snprintf(out, cap, "0x%02X[0x%02X]:", addr, reg);
+            for (int i = 0; i < len; i++)
+                off += snprintf(out+off, cap-(size_t)off, " %02X", buf[i]);
+        } else {
+            nc_strlcpy(out, "error: read failed (check address)", cap);
+        }
+
+    } else if (nc_str_eql(op, "mpu_read") || nc_str_eql(op, "mpu6050")) {
+        /* MPU6050 read: wake up, then read 14 bytes */
+        addr = MPU_ADDR;
+        i2c_write_reg(bus, addr, MPU_PWR, 0);  /* wake up */
+        usleep(10000); /* 10ms delay */
+        uint8_t buf[14];
+        if (i2c_read_reg(bus, addr, MPU_ACCEL, buf, 14)) {
+            int16_t ax = (int16_t)(buf[0]<<8|buf[1]);
+            int16_t ay = (int16_t)(buf[2]<<8|buf[3]);
+            int16_t az = (int16_t)(buf[4]<<8|buf[5]);
+            int16_t temp = (int16_t)(buf[6]<<8|buf[7]);
+            int16_t gx = (int16_t)(buf[8]<<8|buf[9]);
+            int16_t gy = (int16_t)(buf[10]<<8|buf[11]);
+            int16_t gz = (int16_t)(buf[12]<<8|buf[13]);
+            float temp_c = temp / 340.0f + 36.53f;
+            snprintf(out, cap,
+                "MPU6050 (@0x68):\n"
+                "  Accel: X=%d  Y=%d  Z=%d\n"
+                "  Gyro:  X=%d  Y=%d  Z=%d\n"
+                "  Temp:  %.2f C\n",
+                ax, ay, az, gx, gy, gz, temp_c);
+        } else {
+            nc_strlcpy(out, "error: MPU6050 not found (check wiring)", cap);
+        }
+    } else {
+        snprintf(out, cap, "error: unknown op '%.*s'", (int)op.len, op.ptr);
+    }
+
+    nc_arena_free(&a);
+    return true;
+}
+
+nc_tool nc_tool_i2c(void) {
+    return (nc_tool){
+        .def = {
+            .name = "i2c",
+            .description = "I2C bus master. Ops: scan (list devices), read (register[length]), write (register=value), mpu_read (MPU6050 accel/gyro/temp). Params: bus (default 1), address, register, value, length.",
+            .parameters_json = "{"
+                "\"type\":\"object\","
+                "\"properties\":{"
+                    "\"operation\":{\"type\":\"string\"},"
+                    "\"bus\":{\"type\":\"integer\"},"
+                    "\"address\":{\"type\":\"integer\"},"
+                    "\"register\":{\"type\":\"integer\"},"
+                    "\"value\":{\"type\":\"integer\"},"
+                    "\"length\":{\"type\":\"integer\"}"
+                "},"
+                "\"required\":[\"operation\"]"
+            "}",
+        },
+        .ctx = NULL, .execute = i2c_execute, .free = NULL,
+    };
+}
+
+#ifdef NC_TEST
+void nc_test_builtin_tools(void) {
+    char out[4096];
+    nc_tool reasoning = nc_tool_reasoning();
+
+    NC_ASSERT(reasoning.execute(&reasoning,
+        "{\"thought\":\"first\",\"nextThoughtNeeded\":true,\"thoughtNumber\":1,\"totalThoughts\":2}",
+        out, sizeof(out)), "reasoning first step");
+    NC_ASSERT(strstr(out, "\"status\":\"ok\"") != NULL, "reasoning remains active");
+    NC_ASSERT(reasoning.execute(&reasoning,
+        "{\"thought\":\"second\",\"nextThoughtNeeded\":false,\"thoughtNumber\":2,\"totalThoughts\":2}",
+        out, sizeof(out)), "reasoning final step");
+    NC_ASSERT(strstr(out, "\"n\":2") != NULL, "reasoning returns full chain");
+
+    nc_tool tavily = nc_tool_tavily_search(NULL);
+    NC_ASSERT(!tavily.execute(&tavily, "{\"query\":\"test\"}", out, sizeof(out)),
+        "Tavily rejects missing key");
+    NC_ASSERT(strstr(out, "TAVILY_API_KEY") != NULL, "Tavily missing-key guidance");
+}
+#endif

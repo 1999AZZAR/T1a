@@ -19,12 +19,14 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     tools[n++] = nc_tool_env_get();
     tools[n++] = nc_tool_base64();
     tools[n++] = nc_tool_hash(cfg);
+    tools[n++] = nc_tool_core_memory_append(cfg);
+    tools[n++] = nc_tool_core_memory_replace(cfg);
     tools[n++] = nc_tool_acp_delegate();
     /* Built-in MCP tools (replace external Node.js MCP servers) */
     tools[n++] = nc_tool_reasoning();
-    tools[n++] = nc_tool_tavily_search();
+    tools[n++] = nc_tool_tavily_search(getenv("TAVILY_API_KEY"));
     tools[n++] = nc_tool_wikipedia_search();
-    tools[n++] = nc_tool_guardian_memory();
+    tools[n++] = nc_tool_guardian_memory(mem->ctx);
     /* External MCP servers (still available if configured) */
     n = nc_mcp_register_all(cfg, tools, n);
     return n;
@@ -61,7 +63,10 @@ int nc_cmd_agent(int argc, char **argv) {
     nc_agent_init(&agent, &cfg, &prov, tools, tool_count, &mem);
 
     if (msg_arg) {
-        printf("%s\n", nc_agent_chat(&agent, msg_arg));
+        printf("%s\n", nc_agent_chat(&agent, msg_arg, NULL, NULL));
+        nc_agent_free(&agent);
+        mem.free(&mem);
+        if (prov.free) prov.free(&prov);
         return 0;
     }
 
@@ -77,12 +82,15 @@ int nc_cmd_agent(int argc, char **argv) {
 
     nc_log(NC_LOG_INFO, "T1a v%s -- %s mode", NC_VERSION, chan_name);
     nc_log(NC_LOG_INFO, "  Provider: %s", cfg.default_provider);
-    nc_log(NC_LOG_INFO, "  Model:    %s", cfg.default_model);
+    nc_log(NC_LOG_INFO, "  Main:     %s", cfg.default_model);
+    nc_log(NC_LOG_INFO, "  Small:    %s", cfg.small_model);
+    if (cfg.fallback_provider[0])
+        nc_log(NC_LOG_INFO, "  Fallback: %s/%s", cfg.fallback_provider, cfg.fallback_model);
     nc_log(NC_LOG_INFO, "  Tools:    %d loaded", tool_count);
 
     while (1) {
         ch.poll(&ch, &agent);
-        usleep(50000); 
+        usleep(50000);
     }
 
     return 0;
@@ -96,26 +104,43 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
     snprintf(to_buf, sizeof(to_buf), "%ld", chat_id);
 
     if (strcmp(cmd, "/status") == 0) {
-        snprintf(reply, sizeof(reply), 
+        snprintf(reply, sizeof(reply),
             "T1a Unit Status\n\n"
-            "- Model: %s\n"
+            "- Main model: %s\n"
+            "- Small model: %s\n"
             "- Tools: %d active\n"
             "- Memory: %s\n"
             "- Uptime: Stable",
-            agent->config->default_model, agent->tool_count, agent->config->memory_backend);
+            agent->config->default_model, agent->config->small_model,
+            agent->tool_count, agent->config->memory_backend);
     } else if (strcmp(cmd, "/restart") == 0) {
         chan->send(chan, to_buf, "Restarting T1a binary...");
         exit(0);
     } else if (strcmp(cmd, "/reset") == 0) {
         nc_agent_reset(agent);
         snprintf(reply, sizeof(reply), "Conversation reset. Brain is fresh now.");
+    } else if (strcmp(cmd, "/compact") == 0) {
+        int removed = nc_agent_compact_context(agent);
+        if (removed > 0)
+            snprintf(reply, sizeof(reply), "Context compacted. Removed %d old messages; %d remain.",
+                removed, agent->message_count - 1);
+        else
+            snprintf(reply, sizeof(reply), "Context is already compact.");
     } else if (strcmp(cmd, "/help") == 0) {
         snprintf(reply, sizeof(reply),
-            "T1a Commands\n\n"
-            "/status - Show unit health\n"
-            "/reset  - Clear chat history\n"
+            "🤖 *T1a Unit Commands*\n\n"
+            "/status  - Show unit health\n"
+            "/reset   - Clear chat history\n"
+            "/compact - Trim oldest context\n"
             "/restart - Force binary reboot\n"
-            "/help   - Show this list");
+            "/help    - Show this list\n\n"
+            "🛠 *Auto-Detected Abilities:*\n"
+            "- Web browsing (paste URLs)\n"
+            "- Real-time web & Wikipedia search\n"
+            "- Local file operations & shell access\n"
+            "- Calculator & date/time fetch\n"
+            "- System/OS status\n"
+            "- Persistent memory (guardian)");
     } else {
         return false;
     }

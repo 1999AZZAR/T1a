@@ -22,7 +22,7 @@ int nc_cmd_gateway(int argc, char **argv) {
 
     nc_gateway gw;
     nc_gateway_init(&gw, &cfg, &agent);
-    
+
     nc_log(NC_LOG_INFO, "Gateway starting on %s:%d", cfg.gateway_host, cfg.gateway_port);
     nc_gateway_run(&gw);
     return 0;
@@ -34,8 +34,11 @@ int nc_cmd_status(int argc, char **argv) {
     nc_config_load(&cfg);
     printf("noclaw Unit Status\n");
     printf("  Version:  %s\n", NC_VERSION);
-    printf("  Model:    %s\n", cfg.default_model);
+    printf("  Main:     %s\n", cfg.default_model);
+    printf("  Small:    %s\n", cfg.small_model);
     printf("  Provider: %s\n", cfg.default_provider);
+    if (cfg.fallback_provider[0])
+        printf("  Fallback: %s/%s\n", cfg.fallback_provider, cfg.fallback_model);
     return 0;
 }
 
@@ -104,10 +107,13 @@ int nc_cmd_doctor(int argc, char **argv) {
     }
 
     printf("  Provider:  %s\n", cfg.default_provider);
-    printf("  Model:     %s\n", cfg.default_model);
+    printf("  Main:      %s\n", cfg.default_model);
+    printf("  Small:     %s\n", cfg.small_model);
+    if (cfg.fallback_provider[0])
+        printf("  Fallback:  %s/%s\n", cfg.fallback_provider, cfg.fallback_model);
 
     char mem_path[1024];
-    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "memories.tsv");
+    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "guardian.jsonl");
     if (nc_file_exists(mem_path)) {
         printf("  Memory:    %s  [OK]\n", mem_path);
     } else {

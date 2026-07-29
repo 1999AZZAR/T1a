@@ -225,7 +225,7 @@ static void handle_request(nc_gateway *gw, int client_fd) {
             memcpy(msg_buf, message.ptr, cplen);
             msg_buf[cplen] = '\0';
 
-            const char *reply = nc_agent_chat(gw->agent, msg_buf);
+            const char *reply = nc_agent_chat(gw->agent, msg_buf, NULL, NULL);
 
             /* Build JSON response */
             char resp_buf[8192];

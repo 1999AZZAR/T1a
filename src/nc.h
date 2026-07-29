@@ -119,6 +119,7 @@ typedef struct nc_config {
     char api_url[256];
     char default_provider[64];
     char default_model[128];
+    char small_model[128];
     double default_temperature;
     char     gateway_host[64];
     uint16_t gateway_port;
@@ -171,6 +172,8 @@ typedef struct nc_message {
     int           tool_call_count;
 } nc_message;
 
+typedef void (*nc_stream_cb)(void *user_data, const char *chunk);
+
 typedef struct nc_chat_request {
     const nc_message *messages;
     int               message_count;
@@ -178,6 +181,8 @@ typedef struct nc_chat_request {
     double            temperature;
     const char       *tools_json;
     int               max_tokens;
+    nc_stream_cb      stream_cb;
+    void             *stream_user_data;
 } nc_chat_request;
 
 typedef struct nc_chat_response {
@@ -277,11 +282,14 @@ nc_tool nc_tool_list_dir(const nc_config *cfg);
 nc_tool nc_tool_env_get(void);
 nc_tool nc_tool_base64(void);
 nc_tool nc_tool_hash(const nc_config *cfg);
+nc_tool nc_tool_core_memory_append(const nc_config *cfg);
+nc_tool nc_tool_core_memory_replace(const nc_config *cfg);
 nc_tool nc_tool_acp_delegate(void);
 nc_tool nc_tool_reasoning(void);
-nc_tool nc_tool_tavily_search(void);
+nc_tool nc_tool_tavily_search(const char *api_key);
 nc_tool nc_tool_wikipedia_search(void);
-nc_tool nc_tool_guardian_memory(void);
+nc_tool nc_tool_i2c(void);
+nc_tool nc_tool_guardian_memory(void *mem_ctx);
 
 #define NC_MAX_TOOLS 128
 
@@ -315,7 +323,8 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
 
 void nc_agent_init(nc_agent *agent, nc_config *cfg, nc_provider *prov,
                    nc_tool *tools, int tool_count, nc_memory *mem);
-const char *nc_agent_chat(nc_agent *agent, const char *user_input);
+const char *nc_agent_chat(nc_agent *agent, const char *user_input, nc_stream_cb stream_cb, void *stream_user_data);
+int nc_agent_compact_context(nc_agent *agent);
 void nc_agent_reset(nc_agent *agent);
 void nc_agent_free(nc_agent *agent);
 
@@ -338,9 +347,15 @@ typedef struct nc_http_response {
     size_t body_cap;
 } nc_http_response;
 
+typedef bool (*nc_http_stream_cb)(void *user_data, const char *data, size_t len);
+
 bool nc_http_post(const char *url, const char *body, size_t body_len,
                   const char **headers, int header_count,
                   nc_http_response *resp);
+bool nc_http_post_stream(const char *url, const char *body, size_t body_len,
+                         const char **headers, int header_count,
+                         nc_http_stream_cb on_chunk, void *user_data,
+                         nc_http_response *resp);
 bool nc_http_get(const char *url, const char **headers, int header_count,
                  nc_http_response *resp);
 void nc_http_response_free(nc_http_response *resp);
@@ -362,5 +377,30 @@ bool  nc_write_file(const char *path, const char *data, size_t len);
 bool  nc_mkdir_p(const char *path);
 bool  nc_file_exists(const char *path);
 void nc_random_hex(char *out, size_t len);
+
+#ifdef NC_TEST
+extern int nc_test_pass;
+extern int nc_test_fail;
+
+#define NC_ASSERT(condition, name) do { \
+    if (condition) { \
+        nc_test_pass++; \
+        printf("  PASS: %s\n", name); \
+    } else { \
+        nc_test_fail++; \
+        printf("  FAIL: %s (%s:%d)\n", name, __FILE__, __LINE__); \
+    } \
+} while (0)
+
+void nc_test_arena(void);
+void nc_test_str(void);
+void nc_test_json(void);
+void nc_test_jwriter(void);
+void nc_test_config(void);
+void nc_test_memory(void);
+void nc_test_http(void);
+void nc_test_builtin_tools(void);
+void nc_test_agent_context(void);
+#endif
 
 #endif
