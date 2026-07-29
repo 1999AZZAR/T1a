@@ -106,12 +106,22 @@ typedef enum {
     S_WIZ_GPIO_PIN_R,
     S_WIZ_GPIO_MAP_NAME,
     S_WIZ_GPIO_MAP_PIN,
-    S_WIZ_GPIO_UNMAP_NAME
+    S_WIZ_GPIO_UNMAP_NAME,
+    S_WIZ_I2C_OP,
+    S_WIZ_I2C_BUS_S,
+    S_WIZ_I2C_BUS_R,
+    S_WIZ_I2C_ADDR_R,
+    S_WIZ_I2C_LEN_R,
+    S_WIZ_I2C_BUS_W,
+    S_WIZ_I2C_ADDR_W,
+    S_WIZ_I2C_HEX_W
 } wizard_state_t;
 
 static wizard_state_t s_wiz_state = S_WIZ_IDLE;
 static char s_wiz_pin[32] = {0};
 static char s_wiz_name[32] = {0};
+static char s_wiz_bus[32] = {0};
+static char s_wiz_addr[32] = {0};
 
 bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_channel *chan) {
     char reply[1024];
@@ -204,6 +214,87 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             chan->send(chan, to_buf, reply);
             return true;
         }
+
+        if (s_wiz_state == S_WIZ_I2C_OP) {
+            if (strcmp(cmd, "Scan") == 0) {
+                s_wiz_state = S_WIZ_I2C_BUS_S;
+                chan->send(chan, to_buf, "Enter I2C bus number (e.g. 3):||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Read") == 0) {
+                s_wiz_state = S_WIZ_I2C_BUS_R;
+                chan->send(chan, to_buf, "Enter I2C bus number (e.g. 3):||KBD:{\"remove_keyboard\":true}");
+            } else if (strcmp(cmd, "Write") == 0) {
+                s_wiz_state = S_WIZ_I2C_BUS_W;
+                chan->send(chan, to_buf, "Enter I2C bus number (e.g. 3):||KBD:{\"remove_keyboard\":true}");
+            } else {
+                s_wiz_state = S_WIZ_IDLE;
+                chan->send(chan, to_buf, "Invalid operation. Cancelled.||KBD:{\"remove_keyboard\":true}");
+            }
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_BUS_S) {
+            char json[256];
+            snprintf(json, sizeof(json), "{\"action\":\"scan\",\"bus\":%d}", atoi(cmd));
+            nc_tool t = nc_tool_hw_i2c();
+            t.execute(&t, json, reply, sizeof(reply));
+            s_wiz_state = S_WIZ_IDLE;
+            char out[1024];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            chan->send(chan, to_buf, out);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_BUS_R) {
+            nc_strlcpy(s_wiz_bus, cmd, sizeof(s_wiz_bus));
+            s_wiz_state = S_WIZ_I2C_ADDR_R;
+            chan->send(chan, to_buf, "Enter I2C device address (e.g. 0x3C):");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_ADDR_R) {
+            nc_strlcpy(s_wiz_addr, cmd, sizeof(s_wiz_addr));
+            s_wiz_state = S_WIZ_I2C_LEN_R;
+            chan->send(chan, to_buf, "Enter number of bytes to read:");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_LEN_R) {
+            char json[256];
+            snprintf(json, sizeof(json), "{\"action\":\"read\",\"bus\":%d,\"addr\":%d,\"read_len\":%d}", atoi(s_wiz_bus), (int)strtol(s_wiz_addr, NULL, 0), atoi(cmd));
+            nc_tool t = nc_tool_hw_i2c();
+            t.execute(&t, json, reply, sizeof(reply));
+            s_wiz_state = S_WIZ_IDLE;
+            char out[1024];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            chan->send(chan, to_buf, out);
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_BUS_W) {
+            nc_strlcpy(s_wiz_bus, cmd, sizeof(s_wiz_bus));
+            s_wiz_state = S_WIZ_I2C_ADDR_W;
+            chan->send(chan, to_buf, "Enter I2C device address (e.g. 0x3C):");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_ADDR_W) {
+            nc_strlcpy(s_wiz_addr, cmd, sizeof(s_wiz_addr));
+            s_wiz_state = S_WIZ_I2C_HEX_W;
+            chan->send(chan, to_buf, "Enter hex payload to write (e.g. A1B2):");
+            return true;
+        }
+
+        if (s_wiz_state == S_WIZ_I2C_HEX_W) {
+            char json[512];
+            snprintf(json, sizeof(json), "{\"action\":\"write\",\"bus\":%d,\"addr\":%d,\"data_hex\":\"%s\"}", atoi(s_wiz_bus), (int)strtol(s_wiz_addr, NULL, 0), cmd);
+            nc_tool t = nc_tool_hw_i2c();
+            t.execute(&t, json, reply, sizeof(reply));
+            s_wiz_state = S_WIZ_IDLE;
+            char out[1024];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            chan->send(chan, to_buf, out);
+            return true;
+        }
     }
 
     if (cmd[0] != '/') return false;
@@ -241,6 +332,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             "/map_gpio <name> <pin> - Map alias\n"
             "/unmap_gpio <name>     - Remove alias\n"
             "/gpio                  - Interactive GPIO Menu\n"
+            "/i2c                   - Interactive I2C Menu\n"
             "/set_gpio <pin> <val>  - Write GPIO\n"
             "/read_gpio <pin>       - Read GPIO\n"
             "/i2c_scan <bus>       - Scan I2C bus\n"
@@ -270,6 +362,9 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
     } else if (strcmp(cmd, "/gpio") == 0) {
         s_wiz_state = S_WIZ_GPIO_OP;
         snprintf(reply, sizeof(reply), "Choose GPIO operation:||KBD:{\"keyboard\":[[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Map\"},{\"text\":\"Unmap\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
+    } else if (strcmp(cmd, "/i2c") == 0) {
+        s_wiz_state = S_WIZ_I2C_OP;
+        snprintf(reply, sizeof(reply), "Choose I2C operation:||KBD:{\"keyboard\":[[{\"text\":\"Scan\"}],[{\"text\":\"Write\"},{\"text\":\"Read\"}],[{\"text\":\"Cancel\"}]],\"resize_keyboard\":true,\"one_time_keyboard\":true}");
     } else if (strncmp(cmd, "/export_gpio ", 13) == 0) {
         char pin[32] = {0};
         sscanf(cmd + 13, "%31s", pin);
