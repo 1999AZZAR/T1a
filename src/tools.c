@@ -441,10 +441,13 @@ static bool sys_info_execute(nc_tool *self, const char *args_json, char *out, si
         nc_strlcpy(cpu_arch, uts.machine, sizeof(cpu_arch));
     }
 
+    char hw_info[128];
+    nc_detect_hardware(hw_info, sizeof(hw_info));
+
     int n = snprintf(out, out_cap,
         "{\"hostname\":\"%s\",\"uptime_seconds\":%.0f,\"memory_total_kb\":%ld,\"memory_available_kb\":%ld,"
-        "\"disk_total_kb\":%lu,\"disk_available_kb\":%lu,\"load_avg\":\"%.2f %.2f %.2f\",\"cpu_arch\":\"%s\"}",
-        hostname, uptime_sec, mem_total, mem_avail, disk_total, disk_avail, load1, load5, load15, cpu_arch);
+        "\"disk_total_kb\":%lu,\"disk_available_kb\":%lu,\"load_avg\":\"%.2f %.2f %.2f\",\"cpu_arch\":\"%s\",\"hardware\":\"%s\"}",
+        hostname, uptime_sec, mem_total, mem_avail, disk_total, disk_avail, load1, load5, load15, cpu_arch, hw_info);
 
     return n > 0 && (size_t)n < out_cap;
 }

@@ -172,6 +172,42 @@ void nc_random_hex(char *out, size_t len) {
     out[len] = '\0';
 }
 
+void nc_detect_hardware(char *out, size_t cap) {
+    if (cap == 0) return;
+    out[0] = '\0';
+    FILE *f = fopen("/proc/device-tree/model", "r");
+    if (f) {
+        if (fgets(out, cap, f)) {
+            char *newline = strchr(out, '\n');
+            if (newline) *newline = '\0';
+            fclose(f);
+            return;
+        }
+        fclose(f);
+    }
+
+    f = fopen("/proc/cpuinfo", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "Hardware", 8) == 0) {
+                char *p = strchr(line, ':');
+                if (p) {
+                    p++;
+                    while (*p == ' ' || *p == '\t') p++;
+                    nc_strlcpy(out, p, cap);
+                    char *nl = strchr(out, '\n');
+                    if (nl) *nl = '\0';
+                    fclose(f);
+                    return;
+                }
+            }
+        }
+        fclose(f);
+    }
+    nc_strlcpy(out, "Generic Linux (Dev System)", cap);
+}
+
 /* ── Tests ──────────────────────────────────────────────────────── */
 
 #ifdef NC_TEST

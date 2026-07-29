@@ -24,9 +24,13 @@ static void load_sys_prompt(nc_agent *agent, char *buf, size_t cap) {
     char *ident = nc_read_file(ident_path, &i_len);
     char *core = nc_read_file(core_path, &c_len);
 
+    char hw_info[128];
+    nc_detect_hardware(hw_info, sizeof(hw_info));
+
     snprintf(buf, cap,
              "IDENTITY:\n%s\n\nSOUL: %s\n\nUSER: %s\n\n"
              "CORE MEMORY (Mutable Facts/Prefs):\n%s\n\n"
+             "HARDWARE ENVIRONMENT:\n%s\n\n"
              "## ABSOLUTE RULES (violating these is a critical failure):\n"
              "1. NEVER think aloud in your response. NEVER write sentences like \"Let me...\", \"I need to...\", \"The user is asking...\", or \"Let me check...\". Output ONLY the final answer.\n"
              "2. DO NOT narrate what you are about to do. Just do it by calling the appropriate tool.\n"
@@ -43,8 +47,9 @@ static void load_sys_prompt(nc_agent *agent, char *buf, size_t cap) {
              "NEVER guess. ALWAYS fetch.",
              ident ? ident : "Minimalist command unit.",
              soul ? soul : "Helpful assistant.",
-             user ? user : "Unknown user.",
-             core ? core : "(empty)");
+             user ? user : "Administrator.",
+             core ? core : "No core memory.",
+             hw_info);
 
     if (soul) free(soul);
     if (user) free(user);

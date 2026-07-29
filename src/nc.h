@@ -377,6 +377,7 @@ bool  nc_write_file(const char *path, const char *data, size_t len);
 bool  nc_mkdir_p(const char *path);
 bool  nc_file_exists(const char *path);
 void nc_random_hex(char *out, size_t len);
+void nc_detect_hardware(char *out, size_t cap);
 
 #ifdef NC_TEST
 extern int nc_test_pass;
