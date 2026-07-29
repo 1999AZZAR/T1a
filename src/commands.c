@@ -135,14 +135,51 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             "/reset   - Clear chat history\n"
             "/compact - Trim oldest context\n"
             "/restart - Force binary reboot\n"
+            "/set_gpio <pin> <val> - Write GPIO\n"
+            "/read_gpio <pin>      - Read GPIO\n"
+            "/i2c_scan <bus>       - Scan I2C bus\n"
+            "/i2c_read <bus> <addr> <len>\n"
+            "/i2c_write <bus> <addr> <hex>\n"
             "/help    - Show this list\n\n"
             "🛠 *Auto-Detected Abilities:*\n"
-            "- Web browsing (paste URLs)\n"
-            "- Real-time web & Wikipedia search\n"
-            "- Local file operations & shell access\n"
-            "- Calculator & date/time fetch\n"
-            "- System/OS status\n"
+            "- Web browsing & search\n"
+            "- Hardware GPIO & I2C control\n"
             "- Persistent memory (guardian)");
+    } else if (strncmp(cmd, "/set_gpio ", 10) == 0) {
+        char pin[32] = {0}, val[32] = {0};
+        sscanf(cmd + 10, "%31s %31s", pin, val);
+        char json[256];
+        snprintf(json, sizeof(json), "{\"action\":\"write\",\"pin\":\"%s\",\"val\":\"%s\"}", pin, val);
+        nc_tool t = nc_tool_hw_gpio();
+        t.execute(&t, json, reply, sizeof(reply));
+    } else if (strncmp(cmd, "/read_gpio ", 11) == 0) {
+        char pin[32] = {0};
+        sscanf(cmd + 11, "%31s", pin);
+        char json[256];
+        snprintf(json, sizeof(json), "{\"action\":\"read\",\"pin\":\"%s\"}", pin);
+        nc_tool t = nc_tool_hw_gpio();
+        t.execute(&t, json, reply, sizeof(reply));
+    } else if (strncmp(cmd, "/i2c_scan ", 10) == 0) {
+        char bus[32] = {0};
+        sscanf(cmd + 10, "%31s", bus);
+        char json[256];
+        snprintf(json, sizeof(json), "{\"action\":\"scan\",\"bus\":%d}", atoi(bus));
+        nc_tool t = nc_tool_hw_i2c();
+        t.execute(&t, json, reply, sizeof(reply));
+    } else if (strncmp(cmd, "/i2c_read ", 10) == 0) {
+        char bus[32] = {0}, addr[32] = {0}, len[32] = {0};
+        sscanf(cmd + 10, "%31s %31s %31s", bus, addr, len);
+        char json[256];
+        snprintf(json, sizeof(json), "{\"action\":\"read\",\"bus\":%d,\"addr\":%d,\"read_len\":%d}", atoi(bus), (int)strtol(addr,NULL,0), atoi(len));
+        nc_tool t = nc_tool_hw_i2c();
+        t.execute(&t, json, reply, sizeof(reply));
+    } else if (strncmp(cmd, "/i2c_write ", 11) == 0) {
+        char bus[32] = {0}, addr[32] = {0}, hex[256] = {0};
+        sscanf(cmd + 11, "%31s %31s %255s", bus, addr, hex);
+        char json[512];
+        snprintf(json, sizeof(json), "{\"action\":\"write\",\"bus\":%d,\"addr\":%d,\"data_hex\":\"%s\"}", atoi(bus), (int)strtol(addr,NULL,0), hex);
+        nc_tool t = nc_tool_hw_i2c();
+        t.execute(&t, json, reply, sizeof(reply));
     } else {
         return false;
     }
