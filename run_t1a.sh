@@ -4,6 +4,10 @@ set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
 [ -f "$HOME/.noclaw/env" ] && source "$HOME/.noclaw/env"
 
 while true; do
