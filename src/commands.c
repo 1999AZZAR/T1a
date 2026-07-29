@@ -136,8 +136,11 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             "/compact - Trim oldest context\n"
             "/restart - Force binary reboot\n"
             "/map_gpio <name> <pin> - Map alias\n"
-            "/set_gpio <pin> <val> - Write GPIO\n"
-            "/read_gpio <pin>      - Read GPIO\n"
+            "/unmap_gpio <name>     - Remove alias\n"
+            "/export_gpio <pin>     - Export GPIO\n"
+            "/unexport_gpio <pin>   - Unexport GPIO\n"
+            "/set_gpio <pin> <val>  - Write GPIO\n"
+            "/read_gpio <pin>       - Read GPIO\n"
             "/i2c_scan <bus>       - Scan I2C bus\n"
             "/i2c_read <bus> <addr> <len>\n"
             "/i2c_write <bus> <addr> <hex>\n"
@@ -154,6 +157,28 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         } else {
             snprintf(reply, sizeof(reply), "error: failed to map (invalid pin or table full)");
         }
+    } else if (strncmp(cmd, "/unmap_gpio ", 12) == 0) {
+        char name[32] = {0};
+        sscanf(cmd + 12, "%31s", name);
+        if (nc_gpio_remove_alias(name)) {
+            snprintf(reply, sizeof(reply), "success: removed mapping for '%s'", name);
+        } else {
+            snprintf(reply, sizeof(reply), "error: alias '%s' not found", name);
+        }
+    } else if (strncmp(cmd, "/export_gpio ", 13) == 0) {
+        char pin[32] = {0};
+        sscanf(cmd + 13, "%31s", pin);
+        char json[256];
+        snprintf(json, sizeof(json), "{\"action\":\"export\",\"pin\":\"%s\"}", pin);
+        nc_tool t = nc_tool_hw_gpio();
+        t.execute(&t, json, reply, sizeof(reply));
+    } else if (strncmp(cmd, "/unexport_gpio ", 15) == 0) {
+        char pin[32] = {0};
+        sscanf(cmd + 15, "%31s", pin);
+        char json[256];
+        snprintf(json, sizeof(json), "{\"action\":\"unexport\",\"pin\":\"%s\"}", pin);
+        nc_tool t = nc_tool_hw_gpio();
+        t.execute(&t, json, reply, sizeof(reply));
     } else if (strncmp(cmd, "/set_gpio ", 10) == 0) {
         char pin[32] = {0}, val[32] = {0};
         sscanf(cmd + 10, "%31s %31s", pin, val);

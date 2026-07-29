@@ -385,6 +385,7 @@ void nc_detect_hardware(char *out, size_t cap);
 void nc_hardware_init(void);
 bool nc_hardware_is_luckfox(void);
 bool nc_gpio_set_alias(const char *name, const char *pin_str);
+bool nc_gpio_remove_alias(const char *name);
 
 /* GPIO */
 bool nc_gpio_export(int pin);

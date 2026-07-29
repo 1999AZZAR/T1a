@@ -110,6 +110,30 @@ bool nc_gpio_set_alias(const char *name, const char *pin_str) {
     return true;
 }
 
+bool nc_gpio_remove_alias(const char *name) {
+    bool found = false;
+    for (int i = 0; i < s_gpio_alias_count; i++) {
+        if (strcasecmp(s_gpio_aliases[i].name, name) == 0) {
+            for (int j = i; j < s_gpio_alias_count - 1; j++) {
+                s_gpio_aliases[j] = s_gpio_aliases[j + 1];
+            }
+            s_gpio_alias_count--;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) return false;
+
+    FILE *f = fopen("gpio_aliases.txt", "w");
+    if (!f) return false;
+    for (int i = 0; i < s_gpio_alias_count; i++) {
+        fprintf(f, "%s=%d\n", s_gpio_aliases[i].name, s_gpio_aliases[i].pin);
+    }
+    fclose(f);
+    return true;
+}
+
 bool nc_hardware_is_luckfox(void) {
     return s_is_luckfox;
 }
