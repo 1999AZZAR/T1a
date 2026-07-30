@@ -499,7 +499,15 @@ static bool chain_chat(nc_provider *self, const nc_chat_request *req, nc_chat_re
         ctx->fallback.name, ctx->fallback_model);
     nc_chat_request fallback_req = *req;
     fallback_req.model = ctx->fallback_model;
-    return ctx->fallback.chat(&ctx->fallback, &fallback_req, resp);
+    if (ctx->fallback.chat(&ctx->fallback, &fallback_req, resp)) return true;
+
+    /* Both providers failed (likely tool schema 400s on both ends).
+     * Last resort: retry primary with tools stripped so the user
+     * gets a plain-text response rather than silence. */
+    nc_log(NC_LOG_WARN, "Fallback also failed; retrying primary without tools");
+    nc_chat_request notool_req = *req;
+    notool_req.tools_json = NULL;
+    return ctx->primary.chat(&ctx->primary, &notool_req, resp);
 }
 
 static void chain_free(nc_provider *self) {
