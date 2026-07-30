@@ -38,7 +38,14 @@ src/main.c              Entry: agent / gateway / status / doctor
 src/config.c            JSON config + ENV overrides → OpenCode endpoint
 src/agent.c             Chat loop: push_msg → LLM → tools → response
 src/provider.c          OpenAI-compatible OpenCode → Kilo provider chain
-src/hardware.c          GPIO and I2C hardware abstraction + Alias mapping
+src/hardware.c          Core GPIO, I2C, and PWM abstraction + Alias mapping
+src/hw_mpu6050.c        MPU6050 Accelerometer/Gyroscope I2C wrapper
+src/hw_oled.c           OLED SSD1306 frame buffer & 5x7 font rendering
+src/hw_dht.c            DHT11/DHT22 Kernel IIO integration
+src/hw_buzzer.c         Passive buzzer PWM frequency controller
+src/hw_r2d2.c           R2-D2 melody and voice generation engine
+src/hw_servo.c          Standard RC servo (Pan/Tilt) PWM mapping
+src/hw_directio.c       Explicit wrapper for free pins (F1-F5)
 src/commands.c          Tool registration + Telegram Interactive Wizards
 src/tools.c             13 built-in tools
 src/mcp_builtin.c       reasoning + Tavily + Wikipedia + Guardian tools
