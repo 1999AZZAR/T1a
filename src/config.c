@@ -1,5 +1,5 @@
 /*
- * Configuration loader: ~/.noclaw/config.json
+ * Configuration loader: ~/.t1a/config.json
  * Mirrors nullclaw's config structure with C fixed-size buffers.
  */
 

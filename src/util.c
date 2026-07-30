@@ -229,10 +229,10 @@ void nc_test_str(void) {
     NC_ASSERT(e.ptr == NULL && e.len == 0, "str_from NULL");
 
     char buf[64];
-    nc_path_join(buf, sizeof(buf), "/home", ".noclaw");
-    NC_ASSERT(strcmp(buf, "/home/.noclaw") == 0, "path_join 2");
+    nc_path_join(buf, sizeof(buf), "/home", ".t1a");
+    NC_ASSERT(strcmp(buf, "/home/.t1a") == 0, "path_join 2");
 
-    nc_path_join3(buf, sizeof(buf), "/home", ".noclaw", "config.json");
-    NC_ASSERT(strcmp(buf, "/home/.noclaw/config.json") == 0, "path_join 3");
+    nc_path_join3(buf, sizeof(buf), "/home", ".t1a", "config.json");
+    NC_ASSERT(strcmp(buf, "/home/.t1a/config.json") == 0, "path_join 3");
 }
 #endif

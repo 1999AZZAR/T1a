@@ -59,7 +59,7 @@ static void load_sys_prompt(nc_agent *agent, char *buf, size_t cap) {
 
 static void agent_save_chat(nc_agent *agent) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/.noclaw/workspace/chat.bin", getenv("HOME"));
+    snprintf(path, sizeof(path), "%s/.t1a/workspace/chat.bin", getenv("HOME"));
     FILE *f = fopen(path, "wb");
     if (!f) return;
     uint32_t magic = 0x4843434E;
@@ -80,7 +80,7 @@ static void agent_save_chat(nc_agent *agent) {
 
 static void agent_load_chat(nc_agent *agent) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/.noclaw/workspace/chat.bin", getenv("HOME"));
+    snprintf(path, sizeof(path), "%s/.t1a/workspace/chat.bin", getenv("HOME"));
     FILE *f = fopen(path, "rb");
     if (!f) return;
     uint32_t magic = 0;

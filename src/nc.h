@@ -15,7 +15,7 @@
 #include <time.h>
 
 #define NC_VERSION       "0.1.0"
-#define NC_CONFIG_DIR    ".noclaw"
+#define NC_CONFIG_DIR    ".t1a"
 #define NC_CONFIG_FILE   "config.json"
 #define NC_WORKSPACE_DIR "workspace"
 

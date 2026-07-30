@@ -89,9 +89,9 @@ echo ""
 # ── Create config ────────────────────────────────────────────────
 
 echo -e "${BOLD}Creating config...${NC}"
-mkdir -p ~/.noclaw/workspace
+mkdir -p ~/.t1a/workspace
 
-cat > ~/.noclaw/config.json << EOF
+cat > ~/.t1a/config.json << EOF
 {
     "api_key": "***",
     "api_url": "https://opencode.ai/zen/v1",
@@ -116,7 +116,7 @@ cat > ~/.noclaw/config.json << EOF
 EOF
 
 # Keep API keys out of the binary and load them through the launcher.
-ENV_FILE="$HOME/.noclaw/env"
+ENV_FILE="$HOME/.t1a/env"
 ENV_TMP="$ENV_FILE.tmp"
 umask 077
 if [ -f "$ENV_FILE" ]; then
@@ -126,9 +126,9 @@ else
 fi
 printf 'export TAVILY_API_KEY=%q\n' "$TAVILY_KEY" >> "$ENV_TMP"
 mv "$ENV_TMP" "$ENV_FILE"
-echo -e "  ${DIM}Tavily key stored in ~/.noclaw/env${NC}"
+echo -e "  ${DIM}Tavily key stored in ~/.t1a/env${NC}"
 
-echo -e "  ${GREEN}✓${NC} ~/.noclaw/config.json created"
+echo -e "  ${GREEN}✓${NC} ~/.t1a/config.json created"
 echo ""
 
 # ── Create launcher ──────────────────────────────────────────────
@@ -142,7 +142,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 # Source env overrides if present
-[ -f ~/.noclaw/env ] && source ~/.noclaw/env
+[ -f ~/.t1a/env ] && source ~/.t1a/env
 
 while true; do
     ./t1a agent --channel telegram >> /tmp/t1a.log 2>&1
@@ -154,25 +154,25 @@ echo -e "  ${GREEN}✓${NC} run_t1a.sh created"
 
 # ── Identity files ─────────────────────────────────────────────
 
-if [ ! -f ~/.noclaw/SOUL.md ]; then
-    cat > ~/.noclaw/SOUL.md << 'EOF'
+if [ ! -f ~/.t1a/SOUL.md ]; then
+    cat > ~/.t1a/SOUL.md << 'EOF'
 I am T1a, an efficient command unit serving my owner. I speak concisely, use tools silently, and guard my owner's privacy.
 EOF
-    echo -e "  ${GREEN}✓${NC} ~/.noclaw/SOUL.md created"
+    echo -e "  ${GREEN}✓${NC} ~/.t1a/SOUL.md created"
 fi
 
-if [ ! -f ~/.noclaw/USER.md ]; then
-    cat > ~/.noclaw/USER.md << 'EOF'
+if [ ! -f ~/.t1a/USER.md ]; then
+    cat > ~/.t1a/USER.md << 'EOF'
 Unknown user. Awaiting introduction.
 EOF
-    echo -e "  ${GREEN}✓${NC} ~/.noclaw/USER.md created"
+    echo -e "  ${GREEN}✓${NC} ~/.t1a/USER.md created"
 fi
 
-if [ ! -f ~/.noclaw/IDENTITY.md ]; then
-    cat > ~/.noclaw/IDENTITY.md << 'EOF'
+if [ ! -f ~/.t1a/IDENTITY.md ]; then
+    cat > ~/.t1a/IDENTITY.md << 'EOF'
 T1a command unit. Target: embedded Linux devices (Luckfox Pico Mini RV1103). Pure C, BearSSL only. 2 keys: Telegram + Tavily.
 EOF
-    echo -e "  ${GREEN}✓${NC} ~/.noclaw/IDENTITY.md created"
+    echo -e "  ${GREEN}✓${NC} ~/.t1a/IDENTITY.md created"
 fi
 echo ""
 
