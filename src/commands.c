@@ -489,6 +489,17 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         snprintf(json, sizeof(json), "{\"action\":\"write\",\"bus\":%d,\"addr\":%d,\"data_hex\":\"%s\"}", atoi(bus), (int)strtol(addr,NULL,0), hex);
         nc_tool t = nc_tool_hw_i2c();
         t.execute(&t, json, reply, sizeof(reply));
+    } else if (strcmp(cmd, "/start") == 0 || strcmp(cmd, "/clear") == 0) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/.t1a/workspace/chat.bin", getenv("HOME"));
+        remove(path);
+        agent->message_count = 1;
+
+        nc_tool t = nc_tool_sys_info();
+        char sys_info[1024] = {0};
+        t.execute(&t, "{}", sys_info, sizeof(sys_info));
+
+        snprintf(reply, sizeof(reply), "Ready. Context cleared.\n%s\nWhat's the target?", sys_info);
     } else {
         return false;
     }
