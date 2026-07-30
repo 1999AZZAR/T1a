@@ -499,7 +499,12 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         char sys_info[1024] = {0};
         t.execute(&t, "{}", sys_info, sizeof(sys_info));
 
-        snprintf(reply, sizeof(reply), "Ready. Context cleared.\n%s\nWhat's the target?", sys_info);
+        snprintf(reply, sizeof(reply),
+                 "**T1a (Minimalist C-based AI Companion)**\n"
+                 "Version: 0.1.0\n\n"
+                 "Context and short-term memory wiped. Ready for action.\n\n"
+                 "[SYS] %s\n\n"
+                 "Awaiting your command.", sys_info);
     } else {
         return false;
     }
