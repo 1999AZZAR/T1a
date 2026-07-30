@@ -277,7 +277,15 @@ static void parse_dsml_tool_calls(nc_chat_response *resp) {
         char args[2048] = "{";
         int args_len = 1;
         char *end_invoke = strstr(invoke, "</｜｜DSML｜｜invoke>");
-        if (!end_invoke) break;
+        char *self_close = strstr(invoke, "/>");
+
+        if (!end_invoke) {
+            if (self_close) {
+                end_invoke = self_close + 2;
+            } else {
+                break;
+            }
+        }
 
         char *param = invoke;
         bool first = true;
