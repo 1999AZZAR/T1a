@@ -679,7 +679,7 @@ nc_tool nc_tool_http_fetch(void) {
     return (nc_tool){
         .def = {
             .name = "http_fetch",
-            .description = "Fetch a URL and return status and body. Supports http/https. Optional headers as object. HTML content is stripped for readability. Body truncated to 32KB.",
+            .description = "Network tool to fetch a URL (http/https). Can be used to access REST APIs (like ipinfo, weather, etc) or scrape websites. Optional headers object. HTML is stripped.",
             .parameters_json = "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"},\"headers\":{\"type\":\"object\",\"additionalProperties\":{\"type\":\"string\"}}},\"required\":[\"url\"]}",
         },
         .ctx = NULL,

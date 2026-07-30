@@ -1,0 +1,88 @@
+--- src/provider.c
++++ src/provider.c
+@@ -253,6 +253,58 @@
+     resp->has_tool_calls = resp->tool_call_count > 0;
+ }
+
++/* DeepSeek occasionally leaks raw DSML tags instead of JSON tool calls */
++static void parse_dsml_tool_calls(nc_chat_response *resp) {
++    if (resp->has_tool_calls || !resp->content[0]) return;
++
++    char *dsml = strstr(resp->content, "<｜｜DSML｜｜tool_calls>");
++    if (!dsml) return;
++
++    char *invoke = dsml;
++    while ((invoke = strstr(invoke, "<｜｜DSML｜｜invoke name=\"")) != NULL) {
++        if (resp->tool_call_count >= 16) break;
++
++        invoke += 25;
++        char *name_end = strchr(invoke, '"');
++        if (!name_end) break;
++
++        nc_tool_call *out = &resp->tool_calls[resp->tool_call_count];
++        int name_len = name_end - invoke;
++        if (name_len >= (int)sizeof(out->name)) name_len = sizeof(out->name) - 1;
++        memcpy(out->name, invoke, name_len);
++        out->name[name_len] = '\0';
++
++        snprintf(out->id, sizeof(out->id), "dsml_%d", resp->tool_call_count);
++
++        char args[2048] = "{";
++        int args_len = 1;
++        char *end_invoke = strstr(invoke, "</｜｜DSML｜｜invoke>");
++        if (!end_invoke) break;
++
++        char *param = invoke;
++        bool first = true;
++        while ((param = strstr(param, "<｜｜DSML｜｜parameter name=\"")) != NULL && param < end_invoke) {
++            param += 28;
++            char *pname_end = strchr(param, '"');
++            if (!pname_end) break;
++            char *close_tag = strchr(pname_end, '>');
++            if (!close_tag) break;
++            close_tag++;
++            char *pend = strstr(close_tag, "</｜｜DSML｜｜parameter>");
++            if (!pend) break;
++
++            if (!first) { args[args_len++] = ','; }
++            first = false;
++
++            args[args_len++] = '"';
++            int pn_len = pname_end - param;
++            memcpy(args + args_len, param, pn_len);
++            args_len += pn_len;
++            args[args_len++] = '"';
++            args[args_len++] = ':';
++            args[args_len++] = '"';
++
++            int val_len = pend - close_tag;
++            for (int i=0; i<val_len && args_len < sizeof(args)-5; i++) {
++                if (close_tag[i] == '"' || close_tag[i] == '\\') args[args_len++] = '\\';
++                if (close_tag[i] == '\n' || close_tag[i] == '\r') continue;
++                args[args_len++] = close_tag[i];
++            }
++            args[args_len++] = '"';
++            param = pend;
++        }
++        args[args_len++] = '}';
++        args[args_len] = '\0';
++        nc_strlcpy(out->arguments, args, sizeof(out->arguments));
++        resp->tool_call_count++;
++        invoke = end_invoke;
++    }
++
++    if (resp->tool_call_count > 0) {
++        resp->has_tool_calls = true;
++        *dsml = '\0'; /* Hide DSML block from user output */
++    }
++}
++
+ static bool provider_openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_response *resp) {
+     provider_openai_ctx *ctx = (provider_openai_ctx *)self->ctx;
+@@ -425,6 +477,7 @@
+
+                 nc_json *tc = nc_json_get(message, "tool_calls");
+                 openai_parse_tool_calls(tc, resp);
++                parse_dsml_tool_calls(resp);
+             }
+         }

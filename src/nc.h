@@ -286,7 +286,6 @@ nc_tool nc_tool_base64(void);
 nc_tool nc_tool_hash(const nc_config *cfg);
 nc_tool nc_tool_core_memory_append(const nc_config *cfg);
 nc_tool nc_tool_core_memory_replace(const nc_config *cfg);
-nc_tool nc_tool_acp_delegate(void);
 nc_tool nc_tool_reasoning(void);
 nc_tool nc_tool_tavily_search(const char *api_key);
 nc_tool nc_tool_wikipedia_search(void);

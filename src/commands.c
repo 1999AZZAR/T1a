@@ -23,7 +23,6 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     tools[n++] = nc_tool_hash(cfg);
     tools[n++] = nc_tool_core_memory_append(cfg);
     tools[n++] = nc_tool_core_memory_replace(cfg);
-    tools[n++] = nc_tool_acp_delegate();
     /* Built-in MCP tools (replace external Node.js MCP servers) */
     tools[n++] = nc_tool_reasoning();
     tools[n++] = nc_tool_tavily_search(getenv("TAVILY_API_KEY"));
