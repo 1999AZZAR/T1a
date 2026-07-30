@@ -801,6 +801,7 @@ bool nc_http_post(const char *url, const char *body, size_t body_len,
     int off = snprintf(req_header, sizeof(req_header),
         "POST %s HTTP/1.1\r\n"
         "Host: %s\r\n"
+        "User-Agent: T1a/0.1.0\r\n"
         "Content-Length: %zu\r\n"
         "Connection: close\r\n",
         pu.path, pu.host, body_len);
@@ -882,6 +883,7 @@ bool nc_http_get(const char *url, const char **headers, int header_count,
     int off = snprintf(req_header, sizeof(req_header),
         "GET %s HTTP/1.1\r\n"
         "Host: %s\r\n"
+        "User-Agent: T1a/0.1.0\r\n"
         "Connection: close\r\n",
         pu.path, pu.host);
 
