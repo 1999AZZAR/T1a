@@ -118,9 +118,7 @@ typedef enum {
     S_WIZ_I2C_MAP_NAME,
     S_WIZ_I2C_MAP_BUS,
     S_WIZ_I2C_MAP_ADDR,
-    S_WIZ_I2C_UNMAP_NAME,
-    S_WIZ_I2C_DEV_R,
-    S_WIZ_I2C_DEV_W
+    S_WIZ_I2C_UNMAP_NAME
 } wizard_state_t;
 
 static wizard_state_t s_wiz_state = S_WIZ_IDLE;
@@ -172,10 +170,11 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             char json[256];
             snprintf(json, sizeof(json), "{\"action\":\"write\",\"pin\":\"%s\",\"val\":\"%s\"}", s_wiz_pin, cmd);
             nc_tool t = nc_tool_hw_gpio();
-            t.execute(&t, json, reply, sizeof(reply));
+            char hw_reply[2048];
+            t.execute(&t, json, hw_reply, sizeof(hw_reply));
             s_wiz_state = S_WIZ_IDLE;
-            char out[1024];
-            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            char out[2048 + 64];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", hw_reply);
             chan->send(chan, to_buf, out);
             return true;
         }
@@ -184,10 +183,11 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             char json[256];
             snprintf(json, sizeof(json), "{\"action\":\"read\",\"pin\":\"%s\"}", cmd);
             nc_tool t = nc_tool_hw_gpio();
-            t.execute(&t, json, reply, sizeof(reply));
+            char hw_reply[2048];
+            t.execute(&t, json, hw_reply, sizeof(hw_reply));
             s_wiz_state = S_WIZ_IDLE;
-            char out[1024];
-            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            char out[2048 + 64];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", hw_reply);
             chan->send(chan, to_buf, out);
             return true;
         }
@@ -248,10 +248,11 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
             char json[256];
             snprintf(json, sizeof(json), "{\"action\":\"scan\",\"bus\":%d}", atoi(cmd));
             nc_tool t = nc_tool_hw_i2c();
-            t.execute(&t, json, reply, sizeof(reply));
+            char hw_reply[2048];
+            t.execute(&t, json, hw_reply, sizeof(hw_reply));
             s_wiz_state = S_WIZ_IDLE;
-            char out[1024];
-            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            char out[2048 + 64];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", hw_reply);
             chan->send(chan, to_buf, out);
             return true;
         }
@@ -280,12 +281,14 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
 
         if (s_wiz_state == S_WIZ_I2C_LEN_R) {
             char json[256];
-            snprintf(json, sizeof(json), "{\"action\":\"read\",\"bus\":%d,\"addr\":%d,\"read_len\":%d}", atoi(s_wiz_bus), (int)strtol(s_wiz_addr, NULL, 0), atoi(cmd));
+            snprintf(json, sizeof(json), "{\"action\":\"read\",\"bus\":%d,\"addr\":%d,\"read_len\":%d}",
+                atoi(s_wiz_bus), (int)strtol(s_wiz_addr, NULL, 0), atoi(cmd));
             nc_tool t = nc_tool_hw_i2c();
-            t.execute(&t, json, reply, sizeof(reply));
+            char hw_reply[2048];
+            t.execute(&t, json, hw_reply, sizeof(hw_reply));
             s_wiz_state = S_WIZ_IDLE;
-            char out[1024];
-            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            char out[2048 + 64];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", hw_reply);
             chan->send(chan, to_buf, out);
             return true;
         }
@@ -313,13 +316,21 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         }
 
         if (s_wiz_state == S_WIZ_I2C_HEX_W) {
+            /* sanitize: strip any double-quotes from hex payload to prevent JSON injection */
+            char safe_hex[256] = {0};
+            size_t hi = 0;
+            for (size_t ci = 0; cmd[ci] && hi < sizeof(safe_hex) - 1; ci++) {
+                if (cmd[ci] != '"' && cmd[ci] != '\\') safe_hex[hi++] = cmd[ci];
+            }
             char json[512];
-            snprintf(json, sizeof(json), "{\"action\":\"write\",\"bus\":%d,\"addr\":%d,\"data_hex\":\"%s\"}", atoi(s_wiz_bus), (int)strtol(s_wiz_addr, NULL, 0), cmd);
+            snprintf(json, sizeof(json), "{\"action\":\"write\",\"bus\":%d,\"addr\":%d,\"data_hex\":\"%s\"}",
+                atoi(s_wiz_bus), (int)strtol(s_wiz_addr, NULL, 0), safe_hex);
             nc_tool t = nc_tool_hw_i2c();
-            t.execute(&t, json, reply, sizeof(reply));
+            char hw_reply[2048];
+            t.execute(&t, json, hw_reply, sizeof(hw_reply));
             s_wiz_state = S_WIZ_IDLE;
-            char out[1024];
-            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", reply);
+            char out[2048 + 64];
+            snprintf(out, sizeof(out), "%s||KBD:{\"remove_keyboard\":true}", hw_reply);
             chan->send(chan, to_buf, out);
             return true;
         }

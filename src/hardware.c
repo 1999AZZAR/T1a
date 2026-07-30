@@ -4,12 +4,18 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 
 #ifdef __linux__
 #include <linux/i2c-dev.h>
+/* EREMOTEIO is a kernel errno used when the I2C slave NACKs */
+#ifndef EREMOTEIO
+#define EREMOTEIO 121
+#endif
 #else
 #define I2C_SLAVE 0x0703
+#define EREMOTEIO 121
 #endif
 
 static bool s_is_luckfox = false;
@@ -456,16 +462,17 @@ static bool hw_i2c_execute(nc_tool *self, const char *args_json, char *out, size
     }
 
     int bus = atoi(bus_str);
-    int addr = addr_str[0] ? atoi(addr_str) : 0;
+    int addr = addr_str[0] ? (int)strtol(addr_str, NULL, 0) : 0;
 
     if (strcmp(action, "scan") == 0) {
-        char scan_out[256];
+        char scan_out[1024];
+        int  scan_off = 0;
         scan_out[0] = '\0';
         int found = 0;
         char path[64];
         snprintf(path, sizeof(path), "/dev/i2c-%d", bus);
         int fd = s_is_luckfox ? open(path, O_RDWR) : 9999;
-        if (fd < 0) {
+        if (s_is_luckfox && fd < 0) {
             snprintf(out, out_cap, "error: failed to open I2C bus %d for scanning", bus);
             return true;
         }
@@ -473,26 +480,25 @@ static bool hw_i2c_execute(nc_tool *self, const char *args_json, char *out, size
         for (int a = 0x03; a < 0x78; a++) {
             if (s_is_luckfox) {
                 if (ioctl(fd, I2C_SLAVE, a) >= 0) {
-                    unsigned char buf;
-                    if (read(fd, &buf, 1) >= 0) {
-                        char addr_hex[16];
-                        snprintf(addr_hex, sizeof(addr_hex), "\"0x%02X\",", a);
-                        strcat(scan_out, addr_hex);
+                    unsigned char dummy = 0;
+                    ssize_t r = write(fd, &dummy, 0);
+                    if (r >= 0 || errno == EREMOTEIO) {
+                        scan_off += snprintf(scan_out + scan_off,
+                            sizeof(scan_out) - scan_off, "\"0x%02X\",", a);
                         found++;
                     }
                 }
             } else {
-                if (a == 0x3C || a == 0x68) { // mock devices
-                    char addr_hex[16];
-                    snprintf(addr_hex, sizeof(addr_hex), "\"0x%02X\",", a);
-                    strcat(scan_out, addr_hex);
+                if (a == 0x3C || a == 0x68) {
+                    scan_off += snprintf(scan_out + scan_off,
+                        sizeof(scan_out) - scan_off, "\"0x%02X\",", a);
                     found++;
                 }
             }
         }
         if (s_is_luckfox) close(fd);
         if (found > 0) {
-            scan_out[strlen(scan_out)-1] = '\0'; // remove last comma
+            scan_out[strlen(scan_out) - 1] = '\0'; /* remove trailing comma */
             snprintf(out, out_cap, "{\"found\":%d,\"addresses\":[%s]}", found, scan_out);
         } else {
             snprintf(out, out_cap, "{\"found\":0,\"addresses\":[]}");
@@ -512,15 +518,25 @@ static bool hw_i2c_execute(nc_tool *self, const char *args_json, char *out, size
     }
 
     if (strcmp(action, "write") == 0) {
+        if (data_hex[0] == '\0') {
+            nc_i2c_close(fd);
+            snprintf(out, out_cap, "error: data_hex is required for write");
+            return true;
+        }
         unsigned char raw[128];
         size_t raw_len = 0;
         size_t hex_len = strlen(data_hex);
-        for (size_t i = 0; i < hex_len && i < 256 && raw_len < 128; i += 2) {
-            raw[raw_len++] = (hex_char_to_int(data_hex[i]) << 4) | hex_char_to_int(data_hex[i+1]);
+        /* ensure even byte count, ignore trailing odd nibble */
+        for (size_t i = 0; i + 1 < hex_len && raw_len < 128; i += 2) {
+            raw[raw_len++] = (unsigned char)(
+                (hex_char_to_int(data_hex[i]) << 4) | hex_char_to_int(data_hex[i+1]));
         }
         int w = nc_i2c_write(fd, raw, raw_len);
         nc_i2c_close(fd);
-        snprintf(out, out_cap, w >= 0 ? "success: wrote %d bytes" : "error: write failed", w);
+        if (w >= 0)
+            snprintf(out, out_cap, "success: wrote %zu bytes", raw_len);
+        else
+            snprintf(out, out_cap, "error: write failed");
     } else if (strcmp(action, "read") == 0) {
         int rlen = atoi(read_len_str);
         if (rlen <= 0 || rlen > 128) rlen = 1;
