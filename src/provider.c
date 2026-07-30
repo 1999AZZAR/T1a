@@ -493,21 +493,38 @@ nc_provider nc_provider_opencode(const char *api_key) {
 
 static bool chain_chat(nc_provider *self, const nc_chat_request *req, nc_chat_response *resp) {
     chain_ctx *ctx = (chain_ctx *)self->ctx;
-    if (ctx->primary.chat(&ctx->primary, req, resp)) return true;
 
-    nc_log(NC_LOG_WARN, "Primary provider failed; falling back to %s with %s",
-        ctx->fallback.name, ctx->fallback_model);
-    nc_chat_request fallback_req = *req;
-    fallback_req.model = ctx->fallback_model;
-    if (ctx->fallback.chat(&ctx->fallback, &fallback_req, resp)) return true;
+#define CHAIN_MAX_LOOPS  3
+#define CHAIN_RETRY_WAIT 10  /* seconds between full-loop retries */
 
-    /* Both providers failed (likely tool schema 400s on both ends).
-     * Last resort: retry primary with tools stripped so the user
-     * gets a plain-text response rather than silence. */
-    nc_log(NC_LOG_WARN, "Fallback also failed; retrying primary without tools");
-    nc_chat_request notool_req = *req;
-    notool_req.tools_json = NULL;
-    return ctx->primary.chat(&ctx->primary, &notool_req, resp);
+    for (int loop = 0; loop < CHAIN_MAX_LOOPS; loop++) {
+        if (loop > 0) {
+            nc_log(NC_LOG_WARN, "All providers failed; retrying full chain (attempt %d/%d) in %ds...",
+                loop + 1, CHAIN_MAX_LOOPS, CHAIN_RETRY_WAIT);
+            sleep(CHAIN_RETRY_WAIT);
+        }
+
+        /* Tier 1: primary with tools */
+        if (ctx->primary.chat(&ctx->primary, req, resp)) return true;
+
+        /* Tier 2: fallback provider with tools */
+        nc_log(NC_LOG_WARN, "Primary failed; falling back to %s with %s",
+            ctx->fallback.name, ctx->fallback_model);
+        nc_chat_request fallback_req = *req;
+        fallback_req.model = ctx->fallback_model;
+        if (ctx->fallback.chat(&ctx->fallback, &fallback_req, resp)) return true;
+
+        /* Tier 3: primary without tools (degraded mode) */
+        nc_log(NC_LOG_WARN, "Fallback also failed; retrying primary without tools");
+        nc_chat_request notool_req = *req;
+        notool_req.tools_json = NULL;
+        if (ctx->primary.chat(&ctx->primary, &notool_req, resp)) return true;
+
+        nc_log(NC_LOG_WARN, "All 3 tiers failed on loop %d/%d", loop + 1, CHAIN_MAX_LOOPS);
+    }
+
+    nc_log(NC_LOG_ERROR, "Provider chain exhausted after %d loops", CHAIN_MAX_LOOPS);
+    return false;
 }
 
 static void chain_free(nc_provider *self) {
