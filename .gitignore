@@ -1,21 +1,36 @@
+# Build outputs
 obj/
-noclaw
-noclaw_test
-*.log
-.env
+obj_test/
+t1a
+t1a_test
 *.o
+*.d
 *.dSYM/
-*.DS_Store
 build/
 dist/
 release/
 release-*/
+
+# Test binaries and scripts
+test_*
+
+# OS and Editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Environment and Logs
+*.log
+.env
+*.patch
+
+# Compressed archives
 *.tar.gz
 *.zip
 *.tar.bz2
 *.tar.xz
-*.db
 
-# Project Guardian
+# Databases
+*.db
 memory.db
-memory.db-journal
+memory.db-*
