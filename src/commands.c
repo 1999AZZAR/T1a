@@ -15,6 +15,10 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     tools[n++] = nc_tool_sys_info();
     tools[n++] = nc_tool_hw_gpio();
     tools[n++] = nc_tool_hw_i2c();
+    tools[n++] = nc_tool_hw_mpu6050();
+    tools[n++] = nc_tool_hw_dht();
+    tools[n++] = nc_tool_hw_buzzer();
+    tools[n++] = nc_tool_hw_oled();
     tools[n++] = nc_tool_calc();
     tools[n++] = nc_tool_http_fetch();
     tools[n++] = nc_tool_list_dir(cfg);
