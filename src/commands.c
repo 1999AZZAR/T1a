@@ -20,6 +20,7 @@ int nc_register_default_tools(nc_tool *tools, const nc_config *cfg, nc_memory *m
     tools[n++] = nc_tool_hw_buzzer();
     tools[n++] = nc_tool_hw_oled();
     tools[n++] = nc_tool_hw_servo();
+    tools[n++] = nc_tool_hw_directio();
     tools[n++] = nc_tool_calc();
     tools[n++] = nc_tool_http_fetch();
     tools[n++] = nc_tool_list_dir(cfg);
