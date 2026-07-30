@@ -282,6 +282,7 @@ nc_tool nc_tool_hw_mpu6050(void);
 nc_tool nc_tool_hw_dht(void);
 nc_tool nc_tool_hw_buzzer(void);
 nc_tool nc_tool_hw_oled(void);
+nc_tool nc_tool_hw_servo(void);
 
 /* Hardware Utils */
 void hw_buzzer_play_tone(int freq, int duration_ms);
