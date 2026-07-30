@@ -13,8 +13,8 @@ static void write_sysfs(const char *path, const char *val) {
     }
 }
 
-/* Play a single tone */
-static void play_tone(int freq, int duration_ms) {
+/* Play a single tone (public so other modules like r2d2 can use it) */
+void hw_buzzer_play_tone(int freq, int duration_ms) {
     if (freq <= 0 || duration_ms <= 0) return;
     long long period_ns = 1000000000LL / freq;
     long long duty_ns = period_ns / 2;
@@ -52,49 +52,28 @@ static bool hw_buzzer_beep_execute(nc_tool *self, const char *args_json, char *o
     }
 
     if (strlen(melody) > 0) {
-        if (strcmp(melody, "do") == 0) play_tone(261, 300);
-        else if (strcmp(melody, "re") == 0) play_tone(293, 300);
-        else if (strcmp(melody, "mi") == 0) play_tone(329, 300);
-        else if (strcmp(melody, "fa") == 0) play_tone(349, 300);
-        else if (strcmp(melody, "sol") == 0) play_tone(392, 300);
-        else if (strcmp(melody, "la") == 0) play_tone(440, 300);
-        else if (strcmp(melody, "si") == 0) play_tone(493, 300);
-        else if (strcmp(melody, "r2d2_happy") == 0) {
-            play_tone(2000, 100); play_tone(2500, 100);
-            play_tone(3000, 100); play_tone(2000, 100);
-            play_tone(3500, 200);
-        }
-        else if (strcmp(melody, "r2d2_sad") == 0) {
-            play_tone(1000, 200); play_tone(800, 200); play_tone(600, 400);
-        }
-        else if (strcmp(melody, "r2d2_confused") == 0) {
-            play_tone(2000, 150); play_tone(1000, 150); play_tone(1500, 150);
-        }
-        else if (strcmp(melody, "r2d2_excited") == 0) {
-            play_tone(2000, 50); play_tone(2200, 50); play_tone(2500, 50);
-            play_tone(2800, 50); play_tone(3000, 50); play_tone(3500, 200);
-        }
-        else if (strcmp(melody, "r2d2_agree") == 0) {
-            play_tone(2000, 80); play_tone(2500, 150);
-        }
-        else if (strcmp(melody, "r2d2_disagree") == 0) {
-            play_tone(1500, 150); play_tone(1200, 200);
-        }
-        else if (strcmp(melody, "r2d2_processing") == 0) {
-            play_tone(1500, 40); play_tone(1800, 40); play_tone(1200, 40);
-            play_tone(1900, 40); play_tone(1400, 40); play_tone(2100, 40);
-        }
-        else if (strcmp(melody, "r2d2_alert") == 0) {
-            play_tone(3000, 100); play_tone(4000, 100);
-            play_tone(3000, 100); play_tone(4000, 100);
-            play_tone(3000, 100); play_tone(4000, 100);
-        }
+        if (strcmp(melody, "do") == 0) hw_buzzer_play_tone(261, 300);
+        else if (strcmp(melody, "re") == 0) hw_buzzer_play_tone(293, 300);
+        else if (strcmp(melody, "mi") == 0) hw_buzzer_play_tone(329, 300);
+        else if (strcmp(melody, "fa") == 0) hw_buzzer_play_tone(349, 300);
+        else if (strcmp(melody, "sol") == 0) hw_buzzer_play_tone(392, 300);
+        else if (strcmp(melody, "la") == 0) hw_buzzer_play_tone(440, 300);
+        else if (strcmp(melody, "si") == 0) hw_buzzer_play_tone(493, 300);
+        else if (strcmp(melody, "r2d2_happy") == 0) r2d2_play_happy();
+        else if (strcmp(melody, "r2d2_sad") == 0) r2d2_play_sad();
+        else if (strcmp(melody, "r2d2_confused") == 0) r2d2_play_confused();
+        else if (strcmp(melody, "r2d2_excited") == 0) r2d2_play_excited();
+        else if (strcmp(melody, "r2d2_agree") == 0) r2d2_play_agree();
+        else if (strcmp(melody, "r2d2_disagree") == 0) r2d2_play_disagree();
+        else if (strcmp(melody, "r2d2_processing") == 0) r2d2_play_processing();
+        else if (strcmp(melody, "r2d2_alert") == 0) r2d2_play_alert();
+
         snprintf(out, out_cap, "{\"status\": \"success\", \"played_melody\": \"%s\"}", melody);
         return true;
     }
 
     if (freq > 0 && duration_ms > 0) {
-        play_tone(freq, duration_ms);
+        hw_buzzer_play_tone(freq, duration_ms);
         snprintf(out, out_cap, "{\"status\": \"success\", \"freq\": %d, \"duration_ms\": %d}", freq, duration_ms);
         return true;
     }

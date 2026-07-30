@@ -282,6 +282,17 @@ nc_tool nc_tool_hw_mpu6050(void);
 nc_tool nc_tool_hw_dht(void);
 nc_tool nc_tool_hw_buzzer(void);
 nc_tool nc_tool_hw_oled(void);
+
+/* Hardware Utils */
+void hw_buzzer_play_tone(int freq, int duration_ms);
+void r2d2_play_happy(void);
+void r2d2_play_sad(void);
+void r2d2_play_confused(void);
+void r2d2_play_excited(void);
+void r2d2_play_agree(void);
+void r2d2_play_disagree(void);
+void r2d2_play_processing(void);
+void r2d2_play_alert(void);
 nc_tool nc_tool_calc(void);
 nc_tool nc_tool_http_fetch(void);
 nc_tool nc_tool_list_dir(const nc_config *cfg);
