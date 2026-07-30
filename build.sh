@@ -145,7 +145,7 @@ cd "$DIR"
 [ -f ~/.noclaw/env ] && source ~/.noclaw/env
 
 while true; do
-    ./noclaw agent --channel telegram >> /tmp/t1a.log 2>&1
+    ./t1a agent --channel telegram >> /tmp/t1a.log 2>&1
     sleep 5
 done
 LAUNCHER
@@ -182,14 +182,14 @@ echo ""
 
 # ── Verify build ────────────────────────────────────────────────
 
-if [ ! -f ./noclaw ]; then
+if [ ! -f ./t1a ]; then
     echo -e "${YELLOW}Binary not found! Build failed.${NC}"
     exit 1
 fi
 
 # ── Summary ──────────────────────────────────────────────────────
 
-BINARY_SIZE=$(ls -lh noclaw | awk '{print $5}')
+BINARY_SIZE=$(ls -lh t1a | awk '{print $5}')
 
 echo "  ╔══════════════════════════════════════════╗"
 echo "  ║     ${GREEN}Setup Complete${NC}                        ║"
@@ -204,6 +204,6 @@ echo -e "  ║  ${DIM}Run now:${NC}                                    ║"
 echo -e "  ║  ${CYAN}./run_t1a.sh${NC}                                ║"
 echo "  ║                                              ║"
 echo -e "  ║  ${DIM}One-shot test:${NC}                               ║"
-echo -e "  ║  ${CYAN}./noclaw agent -m \"Halo\"${NC}                   ║"
+echo -e "  ║  ${CYAN}./t1a agent -m \"Halo\"${NC}                   ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""

@@ -63,10 +63,10 @@ Only the Telegram bot token is required. Tavily and Kilo keys are optional.
 ./run_t1a.sh
 
 # One-shot via CLI
-./noclaw agent -m "Apa kabar?"
+./t1a agent -m "Apa kabar?"
 
 # Run diagnostics
-./noclaw doctor
+./t1a doctor
 ```
 
 ## Systemd Service

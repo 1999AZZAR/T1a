@@ -11,6 +11,6 @@ fi
 [ -f "$HOME/.noclaw/env" ] && source "$HOME/.noclaw/env"
 
 while true; do
-    ./noclaw agent --channel telegram >> /tmp/t1a.log 2>&1
+    ./t1a agent --channel telegram >> /tmp/t1a.log 2>&1
     sleep 5
 done

@@ -32,7 +32,7 @@ int nc_cmd_status(int argc, char **argv) {
     nc_config cfg;
     nc_config_defaults(&cfg);
     nc_config_load(&cfg);
-    printf("noclaw Unit Status\n");
+    printf("t1a Unit Status\n");
     printf("  Version:  %s\n", NC_VERSION);
     printf("  Main:     %s\n", cfg.default_model);
     printf("  Small:    %s\n", cfg.small_model);
@@ -79,7 +79,7 @@ int nc_cmd_doctor(int argc, char **argv) {
     nc_config_apply_env(&cfg);
 
     int issues = 0;
-    printf("noclaw Doctor\n");
+    printf("t1a Doctor\n");
     printf("=============\n\n");
 
     printf("  Version:   %s\n", NC_VERSION);
@@ -88,7 +88,7 @@ int nc_cmd_doctor(int argc, char **argv) {
         printf("  Config:    %s  [OK]\n", cfg.config_path);
     } else {
         printf("  Config:    %s  [MISSING]\n", cfg.config_path);
-        printf("             Run `noclaw onboard` to create.\n");
+        printf("             Run `t1a onboard` to create.\n");
         issues++;
     }
 

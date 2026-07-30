@@ -15,7 +15,7 @@ OBJ_DIR = obj
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
-TARGET = noclaw
+TARGET = t1a
 
 TEST_FLAGS = -g -O0 -DNC_TEST -DNC_TEST_MAIN
 TEST_OBJ_DIR = obj_test

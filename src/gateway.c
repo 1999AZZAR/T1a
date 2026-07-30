@@ -288,7 +288,7 @@ bool nc_gateway_run(nc_gateway *gw) {
         return false;
     }
 
-    nc_log(NC_LOG_INFO, "noclaw gateway listening on %s:%d",
+    nc_log(NC_LOG_INFO, "t1a gateway listening on %s:%d",
            gw->config->gateway_host, gw->config->gateway_port);
 
     if (gw->config->gateway_require_pairing && !gw->paired) {

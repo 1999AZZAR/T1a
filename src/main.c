@@ -1,5 +1,5 @@
 /*
- * noclaw — The absolute smallest AI assistant. Pure C.
+ * t1a — The absolute smallest AI assistant. Pure C.
  *
  * CLI entry point with subcommand dispatch.
  * Mirrors nullclaw/zeroclaw/picoclaw command structure.
@@ -17,7 +17,7 @@ int nc_test_pass = 0;
 int nc_test_fail = 0;
 
 int main(void) {
-    printf("noclaw test suite\n");
+    printf("t1a test suite\n");
     printf("═════════════════\n\n");
 
     nc_test_arena();
@@ -70,10 +70,10 @@ static void setup_signals(void) {
 
 static void print_usage(void) {
     const char *usage =
-        "noclaw -- The absolute smallest AI assistant. Pure C.\n"
+        "t1a -- The absolute smallest AI assistant. Pure C.\n"
         "\n"
         "USAGE:\n"
-        "  noclaw <command> [options]\n"
+        "  t1a <command> [options]\n"
         "\n"
         "COMMANDS:\n"
         "  onboard     Initialize workspace and configuration\n"
@@ -89,11 +89,11 @@ static void print_usage(void) {
         "  gateway [--port PORT] [--host HOST]\n"
         "\n"
         "EXAMPLES:\n"
-        "  noclaw onboard --api-key sk-... --provider openrouter\n"
-        "  noclaw agent -m \"Hello, noclaw!\"\n"
-        "  noclaw agent\n"
-        "  noclaw gateway --port 8080\n"
-        "  noclaw status\n";
+        "  t1a onboard --api-key sk-... --provider openrouter\n"
+        "  t1a agent -m \"Hello, T1a!\"\n"
+        "  t1a agent\n"
+        "  t1a gateway --port 8080\n"
+        "  t1a status\n";
     fputs(usage, stdout);
 }
 
@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
 
     /* Version */
     if (strcmp(cmd, "--version") == 0 || strcmp(cmd, "-v") == 0) {
-        printf("noclaw %s\n", NC_VERSION);
+        printf("t1a %s\n", NC_VERSION);
         return 0;
     }
 
@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    fprintf(stderr, "Unknown command: %s\n\nRun `noclaw help` for usage.\n", cmd);
+    fprintf(stderr, "Unknown command: %s\n\nRun `t1a help` for usage.\n", cmd);
     return 1;
 }
 
