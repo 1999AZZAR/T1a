@@ -40,4 +40,9 @@ Delegated to the Linux Kernel IIO subsystem for microsecond-accurate timing.
 ## Summary of Resource Utilization
 * **Total Pins Available:** 17
 * **Pins Allocated:** 12
-* **Pins Remaining:** 5 (Reserved for Direct IO: Status LEDs, Push Buttons, Relays)
+* **Pins Remaining:** 5
+  * **F1:** Free Direct IO (e.g., LED, Button, Relay)
+  * **F2:** Free Direct IO
+  * **F3:** Free Direct IO
+  * **F4:** Free Direct IO
+  * **F5:** Free Direct IO
