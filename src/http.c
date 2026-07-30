@@ -52,9 +52,16 @@ static bool parse_url(const char *url, parsed_url *out) {
 
     /* Extract host and optional port */
     const char *slash = strchr(url, '/');
+    const char *question = strchr(url, '?');
+    const char *hash = strchr(url, '#');
+
+    const char *end = slash;
+    if (question && (!end || question < end)) end = question;
+    if (hash && (!end || hash < end)) end = hash;
+
     const char *colon = strchr(url, ':');
 
-    if (colon && (!slash || colon < slash)) {
+    if (colon && (!end || colon < end)) {
         /* Host:port */
         size_t hlen = (size_t)(colon - url);
         if (hlen >= sizeof(out->host)) return false;
@@ -62,21 +69,26 @@ static bool parse_url(const char *url, parsed_url *out) {
         out->host[hlen] = '\0';
 
         colon++;
-        size_t plen = slash ? (size_t)(slash - colon) : strlen(colon);
+        size_t plen = end ? (size_t)(end - colon) : strlen(colon);
         if (plen >= sizeof(out->port)) return false;
         memcpy(out->port, colon, plen);
         out->port[plen] = '\0';
     } else {
-        size_t hlen = slash ? (size_t)(slash - url) : strlen(url);
+        size_t hlen = end ? (size_t)(end - url) : strlen(url);
         if (hlen >= sizeof(out->host)) return false;
         memcpy(out->host, url, hlen);
         out->host[hlen] = '\0';
     }
 
-    if (slash)
-        nc_strlcpy(out->path, slash, sizeof(out->path));
-    else
+    if (end) {
+        if (*end != '/') {
+            snprintf(out->path, sizeof(out->path), "/%s", end);
+        } else {
+            nc_strlcpy(out->path, end, sizeof(out->path));
+        }
+    } else {
         nc_strlcpy(out->path, "/", sizeof(out->path));
+    }
 
     return true;
 }
