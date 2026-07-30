@@ -44,3 +44,10 @@ This document outlines the hardware protocols, addressing, and native C implemen
 * **Control Abstraction:**
   * **Native C Wrapper:** Implemented in `src/hw_servo.c` using the Linux PWM subsystem (`/sys/class/pwm/pwmchip1` and `pwmchip2`). It accepts a 0 to 180 degree integer and calculates the necessary 500us to 2500us pulse length to accurately actuate standard micro servos (e.g. SG90).
   * **LLM Tool:** `hw_servo_set(servo_id, angle)` (where `servo_id` is 0 or 1, and `angle` is 0-180) to physically orient cameras or manipulate physical arms.
+
+## 6. Direct IO (Status LEDs, Buttons, Relays)
+* **Bus:** Standard GPIO
+* **T1a Alias:** `F1`, `F2`, `F3`, `F4`, `F5` (mapped in `gpio_aliases.txt`)
+* **Control Abstraction:**
+  * **Native C Wrapper:** Implemented in `src/hw_directio.c`, proxying requests directly to the underlying `hw_gpio` subsystem. Provides an ultra-simple interface for LLM control of the 5 remaining unallocated pins on the RV1103.
+  * **LLM Tool:** `hw_directio(pin, state)`. `pin` must be `"F1"` through `"F5"`. Omit `state` to read, provide `0` or `1` to write.
