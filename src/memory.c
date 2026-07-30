@@ -380,28 +380,3 @@ nc_memory nc_memory_noop(void) {
         .free   = noop_free,
     };
 }
-
-#ifdef NC_TEST
-void nc_test_memory(void) {
-    char path[] = "/tmp/t1a_guardian_test_XXXXXX";
-    int fd = mkstemp(path);
-    NC_ASSERT(fd >= 0, "create Guardian test file");
-    if (fd >= 0) close(fd);
-
-    nc_memory mem = nc_memory_guardian(path);
-    NC_ASSERT(strcmp(mem.backend_name, "guardian") == 0, "Guardian backend name");
-    NC_ASSERT(mem.store(&mem, "project", "persistent observation"), "Guardian store");
-
-    char out[4096];
-    NC_ASSERT(mem.recall(&mem, "persistent", out, sizeof(out)), "Guardian recall");
-    NC_ASSERT(strstr(out, "persistent observation") != NULL, "Guardian recall content");
-    mem.free(&mem);
-
-    mem = nc_memory_guardian(path);
-    NC_ASSERT(mem.recall(&mem, "persistent", out, sizeof(out)), "Guardian survives reopen");
-    NC_ASSERT(mem.forget(&mem, "project"), "Guardian forget");
-    NC_ASSERT(!mem.recall(&mem, "persistent", out, sizeof(out)), "Guardian forget persisted");
-    mem.free(&mem);
-    unlink(path);
-}
-#endif

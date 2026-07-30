@@ -209,30 +209,3 @@ void nc_detect_hardware(char *out, size_t cap) {
 }
 
 /* ── Tests ──────────────────────────────────────────────────────── */
-
-#ifdef NC_TEST
-void nc_test_str(void) {
-    nc_str a = NC_STR("hello");
-    nc_str b = NC_STR("hello");
-    nc_str c = NC_STR("world");
-
-    NC_ASSERT(nc_str_eq(a, b), "str_eq same");
-    NC_ASSERT(!nc_str_eq(a, c), "str_eq diff");
-    NC_ASSERT(nc_str_eql(a, "hello"), "str_eql match");
-    NC_ASSERT(!nc_str_eql(a, "hell"), "str_eql no match");
-
-    nc_str d = nc_str_from("test");
-    NC_ASSERT(d.len == 4, "str_from len");
-    NC_ASSERT(nc_str_eql(d, "test"), "str_from content");
-
-    nc_str e = nc_str_from(NULL);
-    NC_ASSERT(e.ptr == NULL && e.len == 0, "str_from NULL");
-
-    char buf[64];
-    nc_path_join(buf, sizeof(buf), "/home", ".t1a");
-    NC_ASSERT(strcmp(buf, "/home/.t1a") == 0, "path_join 2");
-
-    nc_path_join3(buf, sizeof(buf), "/home", ".t1a", "config.json");
-    NC_ASSERT(strcmp(buf, "/home/.t1a/config.json") == 0, "path_join 3");
-}
-#endif

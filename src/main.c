@@ -8,39 +8,9 @@
 #include "nc.h"
 #include <string.h>
 #include <stdio.h>
-
-/* ── Test main (when compiled with -DNC_TEST_MAIN) ────────────── */
-
-#ifdef NC_TEST_MAIN
-
-int nc_test_pass = 0;
-int nc_test_fail = 0;
-
-int main(void) {
-    printf("t1a test suite\n");
-    printf("═════════════════\n\n");
-
-    nc_test_arena();
-    nc_test_str();
-    nc_test_json();
-    nc_test_jwriter();
-    nc_test_config();
-    nc_test_memory();
-    nc_test_http();
-    nc_test_builtin_tools();
-    nc_test_agent_context();
-
-    printf("\n═════════════════\n");
-    printf("Results: %d passed, %d failed\n", nc_test_pass, nc_test_fail);
-    return nc_test_fail > 0 ? 1 : 0;
-}
-
-#else /* Normal build */
-
 #include <signal.h>
 #include <stdlib.h>
 
-/* ── Cleanup & Signal Handling ────────────────────────────────── */
 
 static void nc_atexit_cleanup(void) {
     /* Kill all child MCP servers to prevent zombies */
@@ -146,5 +116,3 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Unknown command: %s\n\nRun `t1a help` for usage.\n", cmd);
     return 1;
 }
-
-#endif /* NC_TEST_MAIN */

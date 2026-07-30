@@ -82,36 +82,3 @@ void nc_arena_free(nc_arena *a) {
 }
 
 /* ── Tests ──────────────────────────────────────────────────────── */
-
-#ifdef NC_TEST
-void nc_test_arena(void) {
-    nc_arena a;
-    nc_arena_init(&a, 128);
-
-    void *p1 = nc_arena_alloc(&a, 32);
-    NC_ASSERT(p1 != NULL, "arena alloc 32 bytes");
-
-    void *p2 = nc_arena_alloc(&a, 64);
-    NC_ASSERT(p2 != NULL, "arena alloc 64 bytes");
-    NC_ASSERT(p2 != p1, "arena allocs are distinct");
-
-    /* Test arena dup */
-    char *s = nc_arena_dup(&a, "hello", 5);
-    NC_ASSERT(s != NULL, "arena dup non-null");
-    NC_ASSERT(strcmp(s, "hello") == 0, "arena dup content");
-
-    /* Test growth: allocate more than initial cap — must not invalidate p1/p2 */
-    void *p3 = nc_arena_alloc(&a, 256);
-    NC_ASSERT(p3 != NULL, "arena grows beyond initial cap");
-
-    /* Verify p1 and p2 are still valid (not moved by realloc) */
-    NC_ASSERT(p1 != NULL, "p1 still valid after growth");
-    NC_ASSERT(p2 != NULL, "p2 still valid after growth");
-
-    nc_arena_reset(&a);
-    NC_ASSERT(a.current->pos == 0, "arena reset clears pos");
-
-    nc_arena_free(&a);
-    NC_ASSERT(a.head == NULL, "arena free nulls head");
-}
-#endif

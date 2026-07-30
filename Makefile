@@ -12,15 +12,16 @@ DEBUG_FLAGS = -g -O0 -DDEBUG
 SRC_DIR = src
 OBJ_DIR = obj
 
-SRCS = $(wildcard $(SRC_DIR)/*.c)
+SRCS = $(filter-out $(SRC_DIR)/test_runner.c, $(wildcard $(SRC_DIR)/*.c))
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 TARGET = t1a
 
-TEST_FLAGS = -g -O0 -DNC_TEST -DNC_TEST_MAIN
+TEST_FLAGS   = -g -O0
 TEST_OBJ_DIR = obj_test
-TEST_OBJS = $(SRCS:$(SRC_DIR)/%.c=$(TEST_OBJ_DIR)/%.o)
-DEPS = $(OBJS:.o=.d) $(TEST_OBJS:.o=.d)
+# Test binary links against production .o files (minus main.o) + test_runner.c
+PROD_OBJS_NO_MAIN = $(filter-out $(OBJ_DIR)/main.o, $(OBJS))
+DEPS = $(OBJS:.o=.d)
 
 .PHONY: all clean debug release test
 
@@ -43,19 +44,13 @@ release: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $(OPT_FLAGS) -o $@ $^ $(LDFLAGS)
 
-test: $(TARGET)_test
+test: release $(TARGET)_test
 	./$(TARGET)_test
 
-$(TEST_OBJ_DIR):
-	mkdir -p $(TEST_OBJ_DIR)
-
-$(TEST_OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(TEST_OBJ_DIR)
-	$(CC) $(CFLAGS) $(TEST_FLAGS) $(INCLUDES) -c $< -o $@
-
-$(TARGET)_test: $(TEST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_FLAGS) -o $@ $^ $(LDFLAGS)
+$(TARGET)_test: $(PROD_OBJS_NO_MAIN) $(SRC_DIR)/test_runner.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -g -O0 $(INCLUDES) -o $@ $(PROD_OBJS_NO_MAIN) $(SRC_DIR)/test_runner.c $(LDFLAGS)
 
 clean:
-	rm -rf $(OBJ_DIR) $(TEST_OBJ_DIR) $(TARGET) $(TARGET)_test
+	rm -rf $(OBJ_DIR) $(TARGET) $(TARGET)_test
 
 -include $(DEPS)

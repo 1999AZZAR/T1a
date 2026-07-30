@@ -447,7 +447,6 @@ nc_tool nc_tool_guardian_memory(void *mem_ctx) {
     };
 }
 
-
 /* ══════════════════════════════════════════════════════════════════
  *  I2C TOOL — read/write I2C devices (sensors, actuators)
  *
@@ -619,24 +618,3 @@ nc_tool nc_tool_i2c(void) {
         .ctx = NULL, .execute = i2c_execute, .free = NULL,
     };
 }
-
-#ifdef NC_TEST
-void nc_test_builtin_tools(void) {
-    char out[4096];
-    nc_tool reasoning = nc_tool_reasoning();
-
-    NC_ASSERT(reasoning.execute(&reasoning,
-        "{\"thought\":\"first\",\"nextThoughtNeeded\":true,\"thoughtNumber\":1,\"totalThoughts\":2}",
-        out, sizeof(out)), "reasoning first step");
-    NC_ASSERT(strstr(out, "\"status\":\"ok\"") != NULL, "reasoning remains active");
-    NC_ASSERT(reasoning.execute(&reasoning,
-        "{\"thought\":\"second\",\"nextThoughtNeeded\":false,\"thoughtNumber\":2,\"totalThoughts\":2}",
-        out, sizeof(out)), "reasoning final step");
-    NC_ASSERT(strstr(out, "\"n\":2") != NULL, "reasoning returns full chain");
-
-    nc_tool tavily = nc_tool_tavily_search(NULL);
-    NC_ASSERT(!tavily.execute(&tavily, "{\"query\":\"test\"}", out, sizeof(out)),
-        "Tavily rejects missing key");
-    NC_ASSERT(strstr(out, "TAVILY_API_KEY") != NULL, "Tavily missing-key guidance");
-}
-#endif

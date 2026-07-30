@@ -403,29 +403,4 @@ void nc_i2c_close(int fd);
 int  nc_i2c_write(int fd, const unsigned char *data, size_t len);
 int  nc_i2c_read(int fd, unsigned char *data, size_t len);
 
-#ifdef NC_TEST
-extern int nc_test_pass;
-extern int nc_test_fail;
-
-#define NC_ASSERT(condition, name) do { \
-    if (condition) { \
-        nc_test_pass++; \
-        printf("  PASS: %s\n", name); \
-    } else { \
-        nc_test_fail++; \
-        printf("  FAIL: %s (%s:%d)\n", name, __FILE__, __LINE__); \
-    } \
-} while (0)
-
-void nc_test_arena(void);
-void nc_test_str(void);
-void nc_test_json(void);
-void nc_test_jwriter(void);
-void nc_test_config(void);
-void nc_test_memory(void);
-void nc_test_http(void);
-void nc_test_builtin_tools(void);
-void nc_test_agent_context(void);
-#endif
-
 #endif

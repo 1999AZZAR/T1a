@@ -904,59 +904,6 @@ bool nc_http_get(const char *url, const char **headers, int header_count,
 
 /* ── Tests ────────────────────────────────────────────────────── */
 
-#ifdef NC_TEST
-void nc_test_http(void) {
-    parsed_url pu;
-
-    /* HTTPS URL */
-    NC_ASSERT(parse_url("https://api.openai.com/v1/chat/completions", &pu), "parse https url");
-    NC_ASSERT(pu.is_https == true, "https detected");
-    NC_ASSERT(strcmp(pu.host, "api.openai.com") == 0, "https host parsed");
-    NC_ASSERT(strcmp(pu.port, "443") == 0, "https default port");
-    NC_ASSERT(strcmp(pu.path, "/v1/chat/completions") == 0, "https path parsed");
-
-    /* HTTP URL */
-    NC_ASSERT(parse_url("http://localhost:8080/health", &pu), "parse http url with port");
-    NC_ASSERT(pu.is_https == false, "http detected");
-    NC_ASSERT(strcmp(pu.host, "localhost") == 0, "http host parsed");
-    NC_ASSERT(strcmp(pu.port, "8080") == 0, "http custom port parsed");
-    NC_ASSERT(strcmp(pu.path, "/health") == 0, "http path parsed");
-
-    /* URL with no path */
-    NC_ASSERT(parse_url("https://example.com", &pu), "parse url no path");
-    NC_ASSERT(strcmp(pu.host, "example.com") == 0, "no-path host");
-    NC_ASSERT(strcmp(pu.path, "/") == 0, "no-path defaults to /");
-
-    /* HTTP no port */
-    NC_ASSERT(parse_url("http://example.com/foo/bar", &pu), "parse http no port");
-    NC_ASSERT(strcmp(pu.port, "80") == 0, "http default port 80");
-
-    /* Invalid URL (no scheme) */
-    NC_ASSERT(!parse_url("ftp://bad.com", &pu), "reject ftp scheme");
-    NC_ASSERT(!parse_url("just-a-string", &pu), "reject no scheme");
-
-    /* Response buffer management */
-    nc_http_response resp;
-    resp_init(&resp);
-    NC_ASSERT(resp.body != NULL, "resp_init allocates body");
-    NC_ASSERT(resp.body_len == 0, "resp_init body_len is 0");
-
-    resp_append(&resp, "hello", 5);
-    NC_ASSERT(resp.body_len == 5, "resp_append length");
-    NC_ASSERT(strcmp(resp.body, "hello") == 0, "resp_append content");
-
-    /* Append enough to trigger realloc */
-    char big[8192];
-    memset(big, 'A', sizeof(big));
-    resp_append(&resp, big, sizeof(big));
-    NC_ASSERT(resp.body_len == 5 + sizeof(big), "resp_append after growth");
-    NC_ASSERT(resp.body[0] == 'h', "preserved original data after realloc");
-
-    nc_http_response_free(&resp);
-    NC_ASSERT(resp.body == NULL, "resp_free nulls body");
-}
-#endif
-
 bool nc_http_post_stream(const char *url, const char *body, size_t body_len,
                          const char **headers, int header_count,
                          nc_http_stream_cb on_chunk, void *user_data,

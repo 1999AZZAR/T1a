@@ -350,24 +350,3 @@ void nc_config_apply_env(nc_config *cfg) {
 }
 
 /* ── Tests ──────────────────────────────────────────────────────── */
-
-#ifdef NC_TEST
-void nc_test_config(void) {
-    nc_config cfg;
-    nc_config_defaults(&cfg);
-
-    NC_ASSERT(strcmp(cfg.default_provider, "opencode") == 0, "config default provider");
-    NC_ASSERT(strcmp(cfg.default_model, "deepseek-v4-flash-free") == 0, "config default main model");
-    NC_ASSERT(strcmp(cfg.small_model, "nemotron-3-ultra-free") == 0, "config default small model");
-    NC_ASSERT(cfg.default_temperature == 0.5, "config default temp");
-    NC_ASSERT(cfg.gateway_port == 8888, "config default port");
-    NC_ASSERT(cfg.gateway_require_pairing == true, "config default pairing");
-    NC_ASSERT(cfg.gateway_allow_public_bind == false, "config default no public bind");
-    NC_ASSERT(cfg.workspace_only == true, "config default workspace_only");
-    NC_ASSERT(cfg.secrets_encrypt == true, "config default secrets encrypt");
-    NC_ASSERT(strcmp(cfg.memory_backend, "guardian") == 0, "config default memory backend");
-    NC_ASSERT(strcmp(cfg.runtime_kind, "daemon") == 0, "config default runtime");
-    NC_ASSERT(strcmp(cfg.fallback_provider, "kilo") == 0, "config default fallback provider");
-    NC_ASSERT(strcmp(cfg.fallback_model, "openrouter/free") == 0, "config default fallback model");
-}
-#endif
