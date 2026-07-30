@@ -56,7 +56,7 @@ int nc_cmd_agent(int argc, char **argv) {
     nc_provider prov = nc_provider_from_config(&cfg);
 
     char mem_path[1024];
-    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "guardian.jsonl");
+    nc_path_join(mem_path, sizeof(mem_path), cfg.workspace_dir, "memory.jsonl");
     nc_memory mem = nc_memory_guardian(mem_path);
     nc_tool tools[NC_MAX_TOOLS];
     int tool_count = nc_register_default_tools(tools, &cfg, &mem);
@@ -511,9 +511,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         remove(path);
         snprintf(path, sizeof(path), "%s/.t1a/workspace/core_memory.txt", getenv("HOME"));
         remove(path);
-        snprintf(path, sizeof(path), "%s/.t1a/workspace/guardian.jsonl", getenv("HOME"));
-        remove(path);
-        snprintf(path, sizeof(path), "%s/.t1a/workspace/memories.tsv", getenv("HOME"));
+        snprintf(path, sizeof(path), "%s/.t1a/workspace/memory.jsonl", getenv("HOME"));
         remove(path);
 
         chan->send(chan, to_buf, "System Purge Activated.\nAll core memory, Guardian context, and chat history wiped.\nRestarting T1a daemon...");
