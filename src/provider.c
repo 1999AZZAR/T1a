@@ -487,7 +487,7 @@ nc_provider nc_provider_opencode(const char *api_key) {
        OpenCode's free models don't strictly require auth, but
        the HTTP layer needs a non-empty Bearer token to avoid
        auth header issues. */
-    const char *key = (api_key && api_key[0]) ? api_key : "noclaw-free";
+    const char *key = (api_key && api_key[0]) ? api_key : "t1a-free";
     return nc_provider_openai(key, OPENCODE_BASE_URL);
 }
 

@@ -29,7 +29,7 @@ static bool acp_proc_start(acp_agent *s, const char *cmd) {
         dup2(out_pipe[1], STDOUT_FILENO);
         close(in_pipe[1]); close(out_pipe[0]);
         for (int i = 3; i < 1024; i++) close(i);
-        
+
         char final_cmd[1024];
         if (strcmp(cmd, "codex") == 0 || strcmp(cmd, "codex --acp") == 0) {
             strcpy(final_cmd, "codex app-server --listen stdio://");
@@ -63,7 +63,7 @@ static char *acp_read_msg(acp_agent *s, nc_arena *arena) {
     char *line = NULL;
     size_t line_len = 0;
     size_t line_cap = 0;
-    
+
     while (1) {
         char *nl = memchr(s->rb, '\n', s->rb_len);
         if (nl) {
@@ -78,7 +78,7 @@ static char *acp_read_msg(acp_agent *s, nc_arena *arena) {
             }
             memcpy(line + line_len, s->rb, len);
             line[line_len + len] = '\0';
-            
+
             size_t remain = s->rb_len - (len + 1);
             memmove(s->rb, nl + 1, remain);
             s->rb_len = remain;
@@ -159,7 +159,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
         }
     }
     nc_arena_free(&tmp_a);
-    
+
     if (command[0] == '\0' || prompt[0] == '\0') {
         nc_strlcpy(out, "error: missing command or prompt", out_cap);
         return false;
@@ -176,7 +176,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     nc_arena_init(&a, 512 * 1024);
 
     /* 1. Send initialize */
-    const char *init_params = "{\"protocolVersion\":1,\"capabilities\":{},\"clientInfo\":{\"name\":\"noclaw-orchestrator\",\"version\":\"1.0\"}}";
+    const char *init_params = "{\"protocolVersion\":1,\"capabilities\":{},\"clientInfo\":{\"name\":\"t1a-orchestrator\",\"version\":\"1.0\"}}";
     if (!acp_rpc_call(&s, "initialize", init_params, &a)) {
         nc_strlcpy(out, "error: ACP initialize failed (No JSON-RPC response from agent)", out_cap);
         nc_arena_free(&a);
@@ -216,10 +216,10 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     prompt_esc[j] = '\0';
 
     char sess_prompt_params[10240];
-    snprintf(sess_prompt_params, sizeof(sess_prompt_params), 
-             "{\"sessionId\":\"%.*s\",\"prompt\":[{\"type\":\"text\",\"text\":\"%s\"}]}", 
+    snprintf(sess_prompt_params, sizeof(sess_prompt_params),
+             "{\"sessionId\":\"%.*s\",\"prompt\":[{\"type\":\"text\",\"text\":\"%s\"}]}",
              NC_STR_ARG(sid), prompt_esc);
-    
+
     int sess_prompt_id = ++s.id_counter;
     char req[11000];
     snprintf(req, sizeof(req), "{\"jsonrpc\":\"2.0\",\"method\":\"session/prompt\",\"params\":%s,\"id\":%d}\n", sess_prompt_params, sess_prompt_id);
@@ -233,7 +233,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
     while (time(NULL) - start < 300 && !session_done) {
         char *line = acp_read_msg(&s, &a);
         if (!line) continue;
-        
+
         nc_json *root = nc_json_parse(&a, line, strlen(line));
         if (!root) continue;
 
@@ -242,7 +242,7 @@ static bool acp_delegate_execute(nc_tool *self, const char *args_json, char *out
             nc_json *params = nc_json_get(root, "params");
             nc_json *upd = nc_json_get(params, "update");
             nc_str utype = nc_json_str(nc_json_get(upd, "sessionUpdate"), "");
-            
+
             if (nc_str_eql(utype, "agent_message_chunk")) {
                 nc_json *content = nc_json_get(upd, "content");
                 nc_str text = nc_json_str(nc_json_get(content, "text"), "");

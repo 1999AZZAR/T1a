@@ -7,6 +7,6 @@ if [ -f ".env" ]; then
 fi
 
 while true; do
-    ./noclaw agent --channel telegram >> /tmp/t1a_telegram.log 2>&1
+    ./t1a agent --channel telegram >> /tmp/t1a_telegram.log 2>&1
     sleep 5
 done

@@ -383,7 +383,7 @@ nc_memory nc_memory_noop(void) {
 
 #ifdef NC_TEST
 void nc_test_memory(void) {
-    char path[] = "/tmp/noclaw_guardian_test_XXXXXX";
+    char path[] = "/tmp/t1a_guardian_test_XXXXXX";
     int fd = mkstemp(path);
     NC_ASSERT(fd >= 0, "create Guardian test file");
     if (fd >= 0) close(fd);

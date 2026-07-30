@@ -104,7 +104,7 @@ static bool shell_execute(nc_tool *self, const char *args_json, char *out, size_
         return false;
     }
 
-    if (strstr(command, "noclaw") || strstr(command, "start_t1a.sh")) {
+    if (strstr(command, "t1a") || strstr(command, "start_t1a.sh")) {
         nc_strlcpy(out, "error: recursive command execution forbidden", out_cap);
         return false;
     }

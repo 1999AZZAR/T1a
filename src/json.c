@@ -428,13 +428,13 @@ void nc_test_json(void) {
     nc_arena_init(&a, 4096);
 
     /* Parse object */
-    const char *j1 = "{\"name\": \"noclaw\", \"version\": 1, \"fast\": true}";
+    const char *j1 = "{\"name\": \"t1a\", \"version\": 1, \"fast\": true}";
     nc_json *r1 = nc_json_parse(&a, j1, strlen(j1));
     NC_ASSERT(r1 != NULL, "json parse object");
     NC_ASSERT(r1->type == NC_JSON_OBJECT, "json type object");
 
     nc_str name = nc_json_str(nc_json_get(r1, "name"), "");
-    NC_ASSERT(nc_str_eql(name, "noclaw"), "json get string");
+    NC_ASSERT(nc_str_eql(name, "t1a"), "json get string");
 
     double ver = nc_json_num(nc_json_get(r1, "version"), 0);
     NC_ASSERT(ver == 1.0, "json get number");
@@ -478,13 +478,13 @@ void nc_test_jwriter(void) {
     nc_jw_init(&w, buf, sizeof(buf));
 
     nc_jw_obj_open(&w);
-    nc_jw_str(&w, "name", "noclaw");
+    nc_jw_str(&w, "name", "t1a");
     nc_jw_num(&w, "port", 3000);
     nc_jw_bool(&w, "fast", true);
     nc_jw_obj_close(&w);
 
     NC_ASSERT(w.len > 0, "jwriter produced output");
-    NC_ASSERT(strstr(buf, "\"noclaw\"") != NULL, "jwriter has string");
+    NC_ASSERT(strstr(buf, "\"t1a\"") != NULL, "jwriter has string");
     NC_ASSERT(strstr(buf, "3000") != NULL, "jwriter has number");
     NC_ASSERT(strstr(buf, "true") != NULL, "jwriter has bool");
 }

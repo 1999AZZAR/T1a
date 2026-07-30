@@ -19,7 +19,7 @@ typedef struct {
     int id_counter;
     bool initialized;
     nc_arena arena; /* For server-lifetime allocations */
-    
+
     /* Read buffering */
     char rb[8192];
     size_t rb_len;
@@ -73,10 +73,10 @@ static bool mcp_proc_start(mcp_server *s, const char *cmd, char *const argv[], c
     s->pid = pid;
     s->fd_in = in_pipe[1];
     s->fd_out = out_pipe[0];
-    
+
     /* Ignore SIGPIPE to avoid crashing if server dies */
     signal(SIGPIPE, SIG_IGN);
-    
+
     return true;
 }
 
@@ -88,7 +88,7 @@ static char *mcp_read_msg(mcp_server *s, nc_arena *msg_arena) {
     char *line = NULL;
     size_t line_len = 0;
     size_t line_cap = 0;
-    
+
     while (1) {
         /* Check if we have a newline in the buffer */
         char *nl = memchr(s->rb, '\n', s->rb_len);
@@ -105,12 +105,12 @@ static char *mcp_read_msg(mcp_server *s, nc_arena *msg_arena) {
             }
             memcpy(line + line_len, s->rb, len);
             line[line_len + len] = '\0';
-            
+
             /* Shift buffer */
             size_t remain = s->rb_len - (len + 1);
             memmove(s->rb, nl + 1, remain);
             s->rb_len = remain;
-            
+
             return line;
         }
 
@@ -142,7 +142,7 @@ static char *mcp_read_msg(mcp_server *s, nc_arena *msg_arena) {
         if (n <= 0) break; /* EOF or error */
         s->rb_len = n;
     }
-    
+
     return line; /* Might be partial if EOF reached without newline */
 }
 
@@ -184,7 +184,7 @@ static nc_json *mcp_rpc_call(mcp_server *s, const char *method, const char *para
             /* If read returned NULL (timeout in select), just loop again to check global timeout */
             continue;
         }
-        
+
         /* nc_log(NC_LOG_DEBUG, "MCP <- %s: %s", s->name, line); */
 
         nc_json *root = nc_json_parse(arena, line, strlen(line));
@@ -207,12 +207,12 @@ static nc_json *mcp_rpc_call(mcp_server *s, const char *method, const char *para
 static void mcp_rpc_notify(mcp_server *s, const char *method, const char *params_json) {
     char req[8192];
     if (params_json) {
-        snprintf(req, sizeof(req), 
-                 "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"params\":%s}\n", 
+        snprintf(req, sizeof(req),
+                 "{\"jsonrpc\":\"2.0\",\"method\":\"%s\",\"params\":%s}\n",
                  method, params_json);
     } else {
-        snprintf(req, sizeof(req), 
-                 "{\"jsonrpc\":\"2.0\",\"method\":\"%s\"}\n", 
+        snprintf(req, sizeof(req),
+                 "{\"jsonrpc\":\"2.0\",\"method\":\"%s\"}\n",
                  method);
     }
     write(s->fd_in, req, strlen(req));
@@ -225,11 +225,11 @@ static bool mcp_handshake(mcp_server *s) {
     nc_arena_init(&a, 32 * 1024);
 
     /* 1. Send initialize */
-    const char *init_params = 
+    const char *init_params =
         "{\"protocolVersion\":\"2024-11-05\","
         "\"capabilities\":{\"roots\":{\"listChanged\":true}},"
-        "\"clientInfo\":{\"name\":\"noclaw\",\"version\":\"" NC_VERSION "\"}}";
-    
+        "\"clientInfo\":{\"name\":\"t1a\",\"version\":\"" NC_VERSION "\"}}";
+
     nc_json *res = mcp_rpc_call(s, "initialize", init_params, &a);
     if (!res) {
         nc_log(NC_LOG_ERROR, "MCP handshake failed for %s", s->name);
@@ -242,7 +242,7 @@ static bool mcp_handshake(mcp_server *s) {
 
     s->initialized = true;
     nc_log(NC_LOG_INFO, "MCP server '%s' initialized", s->name);
-    
+
     nc_arena_free(&a);
     return true;
 }
@@ -252,21 +252,21 @@ static bool mcp_handshake(mcp_server *s) {
 static void json_stringify(nc_json *node, char *buf, size_t *off, size_t cap) {
     if (*off >= cap) return;
     int n;
-    
+
     switch (node->type) {
-        case NC_JSON_NULL: 
-            n = snprintf(buf + *off, cap - *off, "null"); 
+        case NC_JSON_NULL:
+            n = snprintf(buf + *off, cap - *off, "null");
             if (n > 0) *off += n;
             break;
-        case NC_JSON_BOOL: 
-            n = snprintf(buf + *off, cap - *off, "%s", node->boolean ? "true" : "false"); 
+        case NC_JSON_BOOL:
+            n = snprintf(buf + *off, cap - *off, "%s", node->boolean ? "true" : "false");
             if (n > 0) *off += n;
             break;
-        case NC_JSON_NUMBER: 
-            n = snprintf(buf + *off, cap - *off, "%g", node->number); 
+        case NC_JSON_NUMBER:
+            n = snprintf(buf + *off, cap - *off, "%g", node->number);
             if (n > 0) *off += n;
             break;
-        case NC_JSON_STRING: 
+        case NC_JSON_STRING:
             if (*off < cap) buf[(*off)++] = '"';
             for (size_t i = 0; i < node->string.len && *off < cap; i++) {
                 char c = node->string.ptr[i];
@@ -274,7 +274,7 @@ static void json_stringify(nc_json *node, char *buf, size_t *off, size_t cap) {
                 else if (c == '\\') n = snprintf(buf + *off, cap - *off, "\\\\");
                 else if (c == '\n') n = snprintf(buf + *off, cap - *off, "\\n");
                 else {
-                     buf[(*off)++] = c; 
+                     buf[(*off)++] = c;
                      n = 0;
                 }
                 if (n > 0) *off += n;
@@ -315,7 +315,7 @@ static bool mcp_tool_execute(nc_tool *self, const char *args_json, char *out, si
     /* Wait, the params argument must be a JSON object string. */
     /* tools/call params: { name: "toolname", arguments: { ... } } */
     /* args_json comes from the LLM, it IS the arguments object string. */
-    
+
     size_t params_sz = strlen(args_json) + strlen(self->def.name) + 64;
     char *params = nc_arena_alloc(&a, params_sz);
     if (!params) { nc_arena_free(&a); return false; }
@@ -331,7 +331,7 @@ static bool mcp_tool_execute(nc_tool *self, const char *args_json, char *out, si
     /* Result schema: { content: [{type: "text", text: "..."}] } */
     nc_json *content = nc_json_get(res, "content");
     out[0] = '\0';
-    
+
     if (content && content->type == NC_JSON_ARRAY) {
         size_t off = 0;
         for (int i = 0; i < content->array.count; i++) {
@@ -352,7 +352,7 @@ static bool mcp_tool_execute(nc_tool *self, const char *args_json, char *out, si
     }
 
     bool is_error = nc_json_bool(nc_json_get(res, "isError"), false);
-    
+
     nc_arena_free(&a);
     return !is_error;
 }
@@ -381,7 +381,7 @@ static int mcp_discover_tools(mcp_server *s, nc_tool *tools, int count) {
                 /* Copy to server arena to persist */
                 char *name_copy = nc_arena_dup(&s->arena, name.ptr, name.len);
                 char *desc_copy = nc_arena_dup(&s->arena, desc.ptr, desc.len);
-                
+
                 /* Serialize schema */
                 char *schema_json = nc_arena_alloc(&s->arena, 8192);
                 size_t off = 0;
@@ -417,7 +417,7 @@ void nc_mcp_cleanup(void) {
                Actually, for cleaner shutdown, we should wait. */
             int status;
             waitpid(s->pid, &status, WNOHANG); /* Try to reap if ready */
-            
+
             nc_arena_free(&s->arena);
             close(s->fd_in);
             close(s->fd_out);
@@ -433,7 +433,7 @@ void nc_mcp_cleanup(void) {
 int nc_mcp_register_all(const nc_config *cfg, nc_tool *tools, int start_idx) {
     char mcp_path[1024];
     nc_path_join(mcp_path, sizeof(mcp_path), cfg->config_dir, "mcp.json");
-    
+
     size_t len;
     char *data = nc_read_file(mcp_path, &len);
     if (!data) return start_idx;
@@ -451,7 +451,7 @@ int nc_mcp_register_all(const nc_config *cfg, nc_tool *tools, int start_idx) {
     for (int i = 0; i < servers->object.count; i++) {
         nc_str sname = servers->object.keys[i];
         nc_json *scfg = &servers->object.vals[i];
-        
+
         nc_str cmd_str = nc_json_str(nc_json_get(scfg, "command"), "");
         if (cmd_str.len == 0) continue;
 
@@ -478,9 +478,9 @@ int nc_mcp_register_all(const nc_config *cfg, nc_tool *tools, int start_idx) {
         /* Prepare envp */
         char *envp[128];
         int envc = 0;
-        
+
         envp[envc++] = "TERM=xterm-256color";
-        
+
         const char *inherit[] = {"PATH", "HOME", "USER", "LANG", "SHELL", NULL};
         for (const char **k = inherit; *k; k++) {
             const char *v = getenv(*k);
