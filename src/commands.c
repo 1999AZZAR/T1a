@@ -489,7 +489,7 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         snprintf(json, sizeof(json), "{\"action\":\"write\",\"bus\":%d,\"addr\":%d,\"data_hex\":\"%s\"}", atoi(bus), (int)strtol(addr,NULL,0), hex);
         nc_tool t = nc_tool_hw_i2c();
         t.execute(&t, json, reply, sizeof(reply));
-    } else if (strcmp(cmd, "/start") == 0 || strcmp(cmd, "/clear") == 0) {
+    } else if (strcmp(cmd, "/start") == 0) {
         char path[256];
         snprintf(path, sizeof(path), "%s/.t1a/workspace/chat.bin", getenv("HOME"));
         remove(path);
@@ -505,6 +505,19 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
                  "Context and short-term memory wiped. Ready for action.\n\n"
                  "[SYS] %s\n\n"
                  "Awaiting your command.", sys_info);
+    } else if (strcmp(cmd, "/clear") == 0) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/.t1a/workspace/chat.bin", getenv("HOME"));
+        remove(path);
+        snprintf(path, sizeof(path), "%s/.t1a/workspace/core_memory.txt", getenv("HOME"));
+        remove(path);
+        snprintf(path, sizeof(path), "%s/.t1a/workspace/guardian.jsonl", getenv("HOME"));
+        remove(path);
+        snprintf(path, sizeof(path), "%s/.t1a/workspace/memories.tsv", getenv("HOME"));
+        remove(path);
+
+        chan->send(chan, to_buf, "System Purge Activated.\nAll core memory, Guardian context, and chat history wiped.\nRestarting T1a daemon...");
+        exit(0);
     } else {
         return false;
     }
