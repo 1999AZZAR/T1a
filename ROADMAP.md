@@ -33,5 +33,5 @@ Our goal is to evolve T1a from a capable embedded AI agent into a plug-and-play 
 - [ ] **Self-Diagnostics:** Agent automatically scans I2C and GPIO at startup, comparing connected hardware against mapped aliases and alerting the user via Telegram if a sensor goes offline.
 
 ## Phase 5: Fleet & Mesh
-- [ ] **Device-to-Device Mesh:** Allow multiple T1a units to communicate over local UDP (e.g. one Luckfox handles vision, another handles motor control).
+- [ ] **Device-to-Device Mesh (Offloaded):** Shift the entire mesh networking logic (e.g., using ESP-NOW or a UDP mesh) onto the ESP32-C3 coprocessor. The Luckfox will only receive the final payload via SPI, saving massive CPU and RAM resources on the RV1103.
 - [ ] **OTA Updates:** Reliable over-the-air updates managed by the Telegram bot via a `/pull_update` native command.
