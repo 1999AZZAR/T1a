@@ -26,6 +26,7 @@ Our goal is to evolve T1a from a capable embedded AI agent into a plug-and-play 
   - OLED 128x64 (SSD1306/SH1106)
   - Buzzer (Melody arrays)
   - DHT11/DHT22 (Temperature/Humidity)
+  - RC Servos (Pan/Tilt)
 
 ## Phase 4: Autonomous Robotics
 - [ ] **Real-Time Control Loop:** Create a dedicated background thread for the AI to register simple "if-this-then-that" rules without needing constant LLM polling (e.g. "if MPU6050 tilt > 30, write PWM 1500 to Servo1").
