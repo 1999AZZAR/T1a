@@ -324,6 +324,90 @@ static void parse_dsml_tool_calls(nc_chat_response *resp) {
     }
 }
 
+/* Nemotron occasionally leaks raw <tool_call> tags */
+static void parse_xml_tool_calls(nc_chat_response *resp) {
+    if (resp->has_tool_calls || !resp->content[0]) return;
+
+    char *tc = strstr(resp->content, "<tool_call>");
+    if (!tc) return;
+
+    char *invoke = tc;
+    while ((invoke = strstr(invoke, "<tool_call>")) != NULL) {
+        if (resp->tool_call_count >= 16) break;
+
+        invoke += 11; /* length of "<tool_call>" */
+        while (*invoke == ' ' || *invoke == '\t') invoke++;
+
+        char *name_end = invoke;
+        while (*name_end && *name_end != '\r' && *name_end != '\n' && *name_end != '<') name_end++;
+
+        if (name_end == invoke) break;
+
+        nc_tool_call *out = &resp->tool_calls[resp->tool_call_count];
+        int name_len = name_end - invoke;
+        if (name_len >= (int)sizeof(out->name)) name_len = sizeof(out->name) - 1;
+        memcpy(out->name, invoke, name_len);
+        out->name[name_len] = '\0';
+
+        snprintf(out->id, sizeof(out->id), "xml_%d", resp->tool_call_count);
+
+        char args[2048] = "{";
+        int args_len = 1;
+
+        char *end_invoke = strstr(invoke, "</tool_call>");
+        if (!end_invoke) break;
+
+        char *param = invoke;
+        bool first = true;
+        while ((param = strstr(param, "<arg_key>")) != NULL && param < end_invoke) {
+            param += 9;
+            char *key_end = strstr(param, "</arg_key>");
+            if (!key_end) break;
+
+            char *val_start = strstr(key_end, "<arg_value>");
+            if (!val_start || val_start > end_invoke) break;
+            val_start += 11;
+
+            char *val_end = strstr(val_start, "</arg_value>");
+            if (!val_end || val_end > end_invoke) break;
+
+            if (!first) { args[args_len++] = ','; }
+            first = false;
+
+            args[args_len++] = '"';
+            int k_len = key_end - param;
+            memcpy(args + args_len, param, k_len);
+            args_len += k_len;
+            args[args_len++] = '"';
+            args[args_len++] = ':';
+            args[args_len++] = '"';
+
+            int v_len = val_end - val_start;
+            for (int i=0; i<v_len && args_len < (int)sizeof(args)-5; i++) {
+                if (val_start[i] == '"' || val_start[i] == '\\') args[args_len++] = '\\';
+                if (val_start[i] == '\n' || val_start[i] == '\r') continue;
+                args[args_len++] = val_start[i];
+            }
+            args[args_len++] = '"';
+
+            param = val_end;
+        }
+
+        args[args_len++] = '}';
+        args[args_len] = '\0';
+
+        nc_strlcpy(out->arguments, args, sizeof(out->arguments));
+        resp->tool_call_count++;
+
+        invoke = end_invoke;
+    }
+
+    if (resp->tool_call_count > 0) {
+        resp->has_tool_calls = true;
+        *tc = '\0'; /* Hide XML block from user output */
+    }
+}
+
 static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_response *resp) {
     provider_ctx *ctx = (provider_ctx *)self->ctx;
     memset(resp, 0, sizeof(*resp));
@@ -498,6 +582,7 @@ static bool openai_chat(nc_provider *self, const nc_chat_request *req, nc_chat_r
                 nc_json *tc = nc_json_get(message, "tool_calls");
                 openai_parse_tool_calls(tc, resp);
                 parse_dsml_tool_calls(resp);
+                parse_xml_tool_calls(resp);
             }
         }
 
