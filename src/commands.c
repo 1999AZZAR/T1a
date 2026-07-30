@@ -499,12 +499,35 @@ bool nc_commands_execute(nc_agent *agent, const char *cmd, long chat_id, nc_chan
         char sys_info[1024] = {0};
         t.execute(&t, "{}", sys_info, sizeof(sys_info));
 
+        nc_arena a;
+        nc_arena_init(&a, 4096);
+        nc_json *root = nc_json_parse(&a, sys_info, strlen(sys_info));
+
+        nc_str hostname = nc_json_str(nc_json_get(root, "hostname"), "unknown");
+        nc_str arch = nc_json_str(nc_json_get(root, "cpu_arch"), "unknown");
+        nc_str load_avg = nc_json_str(nc_json_get(root, "load_avg"), "0.0 0.0 0.0");
+        double uptime_days = nc_json_num(nc_json_get(root, "uptime_seconds"), 0) / 86400.0;
+        double mem_free = nc_json_num(nc_json_get(root, "memory_available_kb"), 0) / (1024.0 * 1024.0);
+        double mem_total = nc_json_num(nc_json_get(root, "memory_total_kb"), 0) / (1024.0 * 1024.0);
+        double disk_free = nc_json_num(nc_json_get(root, "disk_available_kb"), 0) / (1024.0 * 1024.0);
+        double disk_total = nc_json_num(nc_json_get(root, "disk_total_kb"), 0) / (1024.0 * 1024.0);
+
         snprintf(reply, sizeof(reply),
-                 "**T1a (Minimalist C-based AI Companion)**\n"
-                 "Version: 0.1.0\n\n"
-                 "Context and short-term memory wiped. Ready for action.\n\n"
-                 "[SYS] %s\n\n"
-                 "Awaiting your command.", sys_info);
+                 "```\nT1a v0.1.0 | C-Based AI Companion\n"
+                 "─────────────────────────────────────────────\n"
+                 "Host      : %.*s (%.*s)\n"
+                 "Uptime    : %.1f days\n"
+                 "Memory    : %.1f GB free / %.1f GB total\n"
+                 "Storage   : %.1f GB free / %.1f GB total\n"
+                 "Load Avg  : %.*s\n"
+                 "─────────────────────────────────────────────\n"
+                 "[OK] Context wiped. Awaiting command.\n```",
+                 (int)hostname.len, hostname.ptr,
+                 (int)arch.len, arch.ptr,
+                 uptime_days, mem_free, mem_total, disk_free, disk_total,
+                 (int)load_avg.len, load_avg.ptr);
+
+        nc_arena_free(&a);
     } else if (strcmp(cmd, "/clear") == 0) {
         char path[256];
         snprintf(path, sizeof(path), "%s/.t1a/workspace/chat.bin", getenv("HOME"));
