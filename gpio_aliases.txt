@@ -1,5 +1,13 @@
-F1=57
-F2=58
-F3=59
-F4=60
-F5=61
+# Free Direct IO (Pins 0, 1, 2, 3, 14)
+F1=32
+F2=33
+F3=34
+F4=35
+F5=46
+
+# ESP32-C3 Handshake (Pins 17, 56)
+esp_handshake=49
+esp_ready=56
+
+# DHT11 Data (Pin 16) - Note: DHT driver uses Kernel IIO directly, but aliased here for completeness
+dht=48
