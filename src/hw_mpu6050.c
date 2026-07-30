@@ -76,7 +76,7 @@ nc_tool nc_tool_hw_mpu6050(void) {
     nc_tool tool = {
         .def = {
             .name = "hw_mpu_status",
-            .description = "Reads 6-axis accelerometer and gyroscope data from the MPU6050 over I2C.",
+            .description = "Reads 6-axis accelerometer, gyroscope, and internal temperature data from the MPU6050 over I2C.",
             .parameters_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}"
         },
         .execute = hw_mpu_status_execute,
