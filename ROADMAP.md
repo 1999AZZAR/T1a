@@ -19,7 +19,7 @@ Our goal is to evolve T1a from a capable embedded AI agent into a plug-and-play 
 - [ ] **Service Management:** Replace `systemd` user services with a `/etc/init.d/S99t1a` daemon script specifically for Buildroot's lightweight `sysvinit`.
 
 ## Phase 3: Sensor & Output Expansion (Planned)
-- [ ] **PWM Abstraction:** Software PWM implementation (bit-banging via separate thread) or native hardware PWM for servo control.
+- [x] **PWM Abstraction:** Software PWM implementation (bit-banging via separate thread) or native hardware PWM for servo control.
 - [ ] **UART Interface:** Abstract UART for communication with GPS modules, cellular modems, or external microcontrollers.
 - [x] **Pre-built Component Libraries:** Build native C wrappers (invocable via LLM tools) for common hardware:
   - MPU6050 (Accelerometer/Gyroscope)

@@ -37,3 +37,10 @@ This document outlines the hardware protocols, addressing, and native C implemen
 * **Control Abstraction:**
   * **Native C Wrapper:** Implemented in `src/hw_dht.c`. To bypass user-space OS scheduling latency which ruins the microsecond timing of the 1-wire protocol, T1a delegates this entirely to the Linux Kernel. It reads directly from the Industrial I/O (IIO) subsystem (`/sys/bus/iio/devices/iio:device0/in_temp_input`). *(Requires `CONFIG_DHT11` enabled in kernel config)*.
   * **LLM Tool:** `hw_dht_read()` returning JSON `{"temp_c": 24.5, "humidity": 60.0}`.
+
+## 5. Standard 180-Degree RC Servos (Pan/Tilt)
+* **Bus:** Hardware PWM (20ms Period / 50Hz)
+* **T1a Alias:** `servo0`, `servo1`
+* **Control Abstraction:**
+  * **Native C Wrapper:** Implemented in `src/hw_servo.c` using the Linux PWM subsystem (`/sys/class/pwm/pwmchip1` and `pwmchip2`). It accepts a 0 to 180 degree integer and calculates the necessary 500us to 2500us pulse length to accurately actuate standard micro servos (e.g. SG90).
+  * **LLM Tool:** `hw_servo_set(servo_id, angle)` (where `servo_id` is 0 or 1, and `angle` is 0-180) to physically orient cameras or manipulate physical arms.
