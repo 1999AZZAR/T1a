@@ -40,4 +40,4 @@ Delegated to the Linux Kernel IIO subsystem for microsecond-accurate timing.
 ## Summary of Resource Utilization
 * **Total Pins Available:** 17
 * **Pins Allocated:** 12
-* **Pins Remaining:** 5 (Available for future UART GPS/Cellular modems)
+* **Pins Remaining:** 5 (Reserved for Direct IO: Status LEDs, Push Buttons, Relays)
