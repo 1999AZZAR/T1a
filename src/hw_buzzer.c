@@ -70,6 +70,25 @@ static bool hw_buzzer_beep_execute(nc_tool *self, const char *args_json, char *o
         else if (strcmp(melody, "r2d2_confused") == 0) {
             play_tone(2000, 150); play_tone(1000, 150); play_tone(1500, 150);
         }
+        else if (strcmp(melody, "r2d2_excited") == 0) {
+            play_tone(2000, 50); play_tone(2200, 50); play_tone(2500, 50);
+            play_tone(2800, 50); play_tone(3000, 50); play_tone(3500, 200);
+        }
+        else if (strcmp(melody, "r2d2_agree") == 0) {
+            play_tone(2000, 80); play_tone(2500, 150);
+        }
+        else if (strcmp(melody, "r2d2_disagree") == 0) {
+            play_tone(1500, 150); play_tone(1200, 200);
+        }
+        else if (strcmp(melody, "r2d2_processing") == 0) {
+            play_tone(1500, 40); play_tone(1800, 40); play_tone(1200, 40);
+            play_tone(1900, 40); play_tone(1400, 40); play_tone(2100, 40);
+        }
+        else if (strcmp(melody, "r2d2_alert") == 0) {
+            play_tone(3000, 100); play_tone(4000, 100);
+            play_tone(3000, 100); play_tone(4000, 100);
+            play_tone(3000, 100); play_tone(4000, 100);
+        }
         snprintf(out, out_cap, "{\"status\": \"success\", \"played_melody\": \"%s\"}", melody);
         return true;
     }
@@ -88,8 +107,8 @@ nc_tool nc_tool_hw_buzzer(void) {
     nc_tool tool = {
         .def = {
             .name = "hw_buzzer_beep",
-            .description = "Plays a tone or predefined melody on a passive buzzer (e.g. 'do', 're', 'r2d2_happy', 'r2d2_sad').",
-            .parameters_json = "{\"type\":\"object\",\"properties\":{\"melody\":{\"type\":\"string\",\"description\":\"Optional predefined melody (do, re, mi, fa, sol, la, si, r2d2_happy, r2d2_sad)\"},\"freq\":{\"type\":\"integer\"},\"duration_ms\":{\"type\":\"integer\"}}}"
+            .description = "Plays a tone or predefined melody on a passive buzzer (e.g. 'do', 're', 'r2d2_happy', 'r2d2_sad', 'r2d2_confused', 'r2d2_excited', 'r2d2_agree', 'r2d2_disagree', 'r2d2_processing', 'r2d2_alert').",
+            .parameters_json = "{\"type\":\"object\",\"properties\":{\"melody\":{\"type\":\"string\",\"description\":\"Optional predefined melody (do, re, mi, fa, sol, la, si, r2d2_happy, r2d2_sad, r2d2_confused, r2d2_excited, r2d2_agree, r2d2_disagree, r2d2_processing, r2d2_alert)\"},\"freq\":{\"type\":\"integer\"},\"duration_ms\":{\"type\":\"integer\"}}}"
         },
         .execute = hw_buzzer_beep_execute,
         .free = NULL
